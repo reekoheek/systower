@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/godbus/dbus/v5"
 	"github.com/reekoheek/caffeine/internal/caffeine"
 )
 
@@ -12,12 +14,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := caffeine.New()
+	conn, err := dbus.SessionBus()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer c.Close()
+	defer conn.Close()
+
+	c := caffeine.New(conn, createAdapter())
 
 	switch os.Args[1] {
 	case "listen":
@@ -36,4 +40,18 @@ func main() {
 	default:
 		os.Exit(1)
 	}
+}
+
+func createAdapter() caffeine.Adapter {
+	isWayland := os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland"
+	if !isWayland {
+		return caffeine.NewX11Adapter()
+	}
+
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir == "" {
+		runtimeDir = "/tmp"
+	}
+	pidfile := filepath.Join(runtimeDir, "swayidle.pid")
+	return caffeine.NewWaylandAdapter(pidfile)
 }

@@ -2,8 +2,6 @@ package caffeine
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -19,36 +17,14 @@ type Caffeine struct {
 	adapter Adapter
 }
 
-func New() (*Caffeine, error) {
-	conn, err := dbus.SessionBus()
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to session bus: %w", err)
-	}
-
-	var adapter Adapter
-	isWayland := os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland"
-
-	if isWayland {
-		runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
-		if runtimeDir == "" {
-			runtimeDir = "/tmp"
-		}
-		pidfile := filepath.Join(runtimeDir, "swayidle.pid")
-		adapter = NewWaylandAdapter(pidfile)
-	} else {
-		adapter = NewX11Adapter()
-	}
-
+func New(conn *dbus.Conn, adapter Adapter) *Caffeine {
 	return &Caffeine{
 		conn:    conn,
 		adapter: adapter,
-	}, nil
+	}
 }
 
 func (c *Caffeine) Close() {
-	if c.conn != nil {
-		c.conn.Close()
-	}
 }
 
 func (c *Caffeine) Status() string {
