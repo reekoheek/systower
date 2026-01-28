@@ -48,7 +48,7 @@ func main() {
 
 		go func() {
 			for info := range batCh {
-				if info.Status != "charging" {
+				if info.Status == "charging" {
 					continue
 				}
 
