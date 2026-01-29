@@ -5,31 +5,22 @@ package poller
 import (
 	"testing"
 	"time"
-
-	"github.com/reekoheek/systower/internal/cpu"
 )
 
 func TestPoller_Start(t *testing.T) {
 	p := New(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)
 	ch := p.Listen()
 
-	var prevCPU cpu.Stats
-
-	// first poll
+	// first poll (cumulative since boot, skip)
 	stats := <-ch
-	t.Logf("poll 1 - cpu: idle=%d total=%d, mem: %5.1f%%, storage: %5.1f%%",
-		stats.CPU.Idle, stats.CPU.Total,
+	t.Logf("poll 1 - cpu: %5.1f%%, mem: %5.1f%%, storage: %5.1f%%",
+		stats.CPU.Percent(),
 		pct(stats.Mem.MemUsed, stats.Mem.Mem),
 		pct(stats.Storage.Used, stats.Storage.Total))
 
-	if stats.CPU.Total == 0 {
-		t.Error("cpu total should be > 0")
-	}
-	prevCPU = stats.CPU
-
-	// second poll
+	// second poll (delta-based, accurate)
 	stats = <-ch
-	cpuPct := calcCPUPct(prevCPU, stats.CPU)
+	cpuPct := stats.CPU.Percent()
 	t.Logf("poll 2 - cpu: %5.1f%%, mem: %5.1f%%, storage: %5.1f%%",
 		cpuPct,
 		pct(stats.Mem.MemUsed, stats.Mem.Mem),
@@ -51,16 +42,4 @@ func pct(used, total uint64) float64 {
 		return 0
 	}
 	return float64(used) / float64(total) * 100
-}
-
-func calcCPUPct(prev, curr cpu.Stats) float64 {
-	if prev.Total == 0 {
-		return 0
-	}
-	deltaIdle := curr.Idle - prev.Idle
-	deltaTotal := curr.Total - prev.Total
-	if deltaTotal == 0 {
-		return 0
-	}
-	return 100 * (1 - float64(deltaIdle)/float64(deltaTotal))
 }

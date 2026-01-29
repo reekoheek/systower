@@ -19,35 +19,48 @@ func (s Stats) Percent() float64 {
 	return 100 - float64(s.Idle)*100/float64(s.Total)
 }
 
-type Reader struct{}
+type Reader struct {
+	prevIdle  uint64
+	prevTotal uint64
+}
 
 func New() *Reader {
 	return &Reader{}
 }
 
 func (r *Reader) Read() Stats {
-	return r.readProcStat()
+	idle, total := r.readProcStat()
+
+	deltaIdle := idle - r.prevIdle
+	deltaTotal := total - r.prevTotal
+
+	r.prevIdle = idle
+	r.prevTotal = total
+
+	return Stats{
+		Idle:  deltaIdle,
+		Total: deltaTotal,
+	}
 }
 
-func (r *Reader) readProcStat() Stats {
+func (r *Reader) readProcStat() (idle, total uint64) {
 	f, err := os.Open("/proc/stat")
 	if err != nil {
-		return Stats{}
+		return 0, 0
 	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	if !scanner.Scan() {
-		return Stats{}
+		return 0, 0
 	}
 
 	// cpu  user nice system idle iowait irq softirq steal guest guest_nice
 	fields := strings.Fields(scanner.Text())
 	if len(fields) < 5 || fields[0] != "cpu" {
-		return Stats{}
+		return 0, 0
 	}
 
-	var stats Stats
 	// user nice system idle iowait irq softirq steal | guest guest_nice
 	// guest/guest_nice already included in user/nice, skip them
 	for i, field := range fields[1:] {
@@ -55,11 +68,11 @@ func (r *Reader) readProcStat() Stats {
 			break
 		}
 		val, _ := strconv.ParseUint(field, 10, 64)
-		stats.Total += val
+		total += val
 		if i == 3 || i == 4 { // idle + iowait
-			stats.Idle += val
+			idle += val
 		}
 	}
 
-	return stats
+	return idle, total
 }
