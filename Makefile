@@ -6,17 +6,17 @@ build:
 		-trimpath \
 		-ldflags="-s -w -extldflags '-static'" \
 		-tags netgo,osusergo \
-		-o caffeine \
-		./cmd/caffeine
+		-o systower \
+		./cmd/systower
 
 run: build
-	./caffeine
+	./systower
 
 clean:
-	rm -f ./caffeine
+	rm -f ./systower
 
 install: build
-	cp ./caffeine ~/bin
+	cp ./systower ~/bin
 
 uninstall:
-	rm ~/bin/caffeine
+	rm ~/bin/systower

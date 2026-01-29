@@ -6,26 +6,26 @@ import (
 )
 
 type WaylandAdapter struct {
-	pidfile string
+	lockfile string
 }
 
-func NewWaylandAdapter(pidfile string) *WaylandAdapter {
-	return &WaylandAdapter{pidfile: pidfile}
+func NewWaylandAdapter(lockfile string) *WaylandAdapter {
+	return &WaylandAdapter{lockfile: lockfile}
 }
 
 func (a *WaylandAdapter) On() {
 	exec.Command("pkill", "swayidle").Run()
-	os.WriteFile(a.pidfile, []byte{}, 0644)
+	os.WriteFile(a.lockfile, []byte{}, 0644)
 }
 
 func (a *WaylandAdapter) Off() {
 	exec.Command("pkill", "swayidle").Run()
 	a.startSwayidle()
-	os.Remove(a.pidfile)
+	os.Remove(a.lockfile)
 }
 
 func (a *WaylandAdapter) Status() string {
-	if _, err := os.Stat(a.pidfile); err == nil {
+	if _, err := os.Stat(a.lockfile); err == nil {
 		return "on"
 	}
 	return "off"

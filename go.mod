@@ -1,4 +1,4 @@
-module github.com/reekoheek/caffeine
+module github.com/reekoheek/systower
 
 go 1.22.2
 
