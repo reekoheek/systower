@@ -3,20 +3,21 @@ package notification
 import "github.com/godbus/dbus/v5"
 
 type Notification struct {
-	conn *dbus.Conn
+	conn  *dbus.Conn
+	title string
 }
 
-func New(conn *dbus.Conn) *Notification {
-	return &Notification{conn: conn}
+func New(conn *dbus.Conn, title string) *Notification {
+	return &Notification{conn: conn, title: title}
 }
 
-func (n *Notification) Send(summary, body string) {
+func (n *Notification) Send(body string) {
 	n.conn.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications").
 		Call("org.freedesktop.Notifications.Notify", 0,
 			"systower",
 			uint32(0),
 			"",
-			summary,
+			n.title,
 			body,
 			[]string{},
 			map[string]dbus.Variant{},

@@ -37,19 +37,24 @@ func (u *Listen) Execute() {
 
 			if u.caff.Status() == "on" && info.Capacity < 15 {
 				u.caff.Off()
-				u.notif.Send("Systower", "Low battery, disable systower")
+				u.notif.Send("Low battery, disable caffeine")
 			}
 
 			if info.Capacity < 5 {
-				u.notif.Send("Systower", "Battery almost drained, have a nice sleep")
+				u.notif.Send("Battery almost drained, have a nice sleep")
 				time.Sleep(5 * time.Second)
 				u.sysMgr.Poweroff()
 			}
 		}
 	}()
 
-	if err := u.caff.Listen(); err != nil {
+	caffCh, err := u.caff.Listen()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	for status := range caffCh {
+		fmt.Printf("status|string|%s\n\n", status)
 	}
 }

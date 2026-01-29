@@ -54,7 +54,7 @@ func (m *Monitor) Listen() <-chan Info
 - Listen DBus events dari UPower
 - Emit ke channel saat battery state berubah
 
-### 4. Wake Module (`internal/caffeine/caffeine.go`)
+### 4. Caffeine Module (`internal/caffeine/caffeine.go`)
 ```go
 type Monitor struct {}
 
@@ -110,8 +110,8 @@ func listen() {
             state.Battery = b.Capacity
             state.BatteryStatus = b.Status
             // low battery logic here
-        case w := <-caffeineCh:
-            state.Wake = w
+        case c := <-caffeineCh:
+            state.Caffeine = c
         }
         state.Print()
     }
@@ -119,7 +119,7 @@ func listen() {
 ```
 
 ### 7. Update Battery Logic
-- [x] Keep existing low battery auto-off wake
+- [x] Keep existing low battery auto-off caffeine
 - [x] Keep existing critical battery poweroff
 - [x] Rename notification dari "Caffeine" → "Systower"
 
