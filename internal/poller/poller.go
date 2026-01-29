@@ -38,8 +38,9 @@ func (p *Poller) Listen() <-chan Stats {
 		memReader := mem.New()
 		storageReader := storage.New("/")
 
-		baseInterval := p.cpuInterval
+		baseInterval := time.Second
 
+		cpuMult := max(1, int(p.cpuInterval/baseInterval))
 		memMult := max(1, int(p.memInterval/baseInterval))
 		storageMult := max(1, int(p.storageInterval/baseInterval))
 
@@ -58,7 +59,9 @@ func (p *Poller) Listen() <-chan Stats {
 		prevStats = stats
 
 		for range ticker.C {
-			stats.CPU = cpuReader.Read()
+			if tick%cpuMult == 0 {
+				stats.CPU = cpuReader.Read()
+			}
 
 			if tick%memMult == 0 {
 				stats.Mem = memReader.Read()
@@ -74,7 +77,7 @@ func (p *Poller) Listen() <-chan Stats {
 			}
 
 			tick++
-			if tick >= storageMult {
+			if tick >= max(cpuMult, max(memMult, storageMult)) {
 				tick = 0
 			}
 		}
