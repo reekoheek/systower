@@ -88,6 +88,9 @@ func (s *Systower) Watch() {
 		os.Exit(1)
 	}
 
+	debounce := time.NewTimer(0)
+	<-debounce.C // drain initial tick
+
 	for {
 		select {
 		case info, ok := <-batCh:
@@ -132,8 +135,11 @@ func (s *Systower) Watch() {
 				return
 			}
 			s.stats.Storage = stats
+		case <-debounce.C:
+			s.print()
+			continue
 		}
-		s.print()
+		debounce.Reset(100 * time.Millisecond)
 	}
 }
 
