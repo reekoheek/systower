@@ -12,6 +12,7 @@ import (
 const (
 	sysfsPath          = "/sys/class/power_supply"
 	upowerPath         = "/org/freedesktop/UPower/devices/battery_BAT0"
+	upowerDeviceIface  = "org.freedesktop.UPower.Device"
 	propsIface         = "org.freedesktop.DBus.Properties"
 	propsChangedSignal = "PropertiesChanged"
 )
@@ -74,26 +75,67 @@ func (m *Monitor) Read() Stats {
 	return m.info
 }
 
-func (m *Monitor) parseEstimate(body []interface{}) {
+var stateNames = map[uint32]string{
+	1: "charging",
+	2: "discharging",
+	3: "empty",
+	4: "full",
+	5: "charging",    // pending charge
+	6: "discharging", // pending discharge
+}
+
+func (m *Monitor) parseSignal(body []interface{}) bool {
 	if len(body) < 2 {
-		return
+		return false
 	}
 
 	props, ok := body[1].(map[string]dbus.Variant)
 	if !ok {
-		return
+		return false
+	}
+
+	changed := false
+
+	if v, ok := props["State"]; ok {
+		if state, ok := v.Value().(uint32); ok {
+			if name, ok := stateNames[state]; ok {
+				m.info.Status = name
+				changed = true
+			}
+		}
+	}
+
+	if v, ok := props["Percentage"]; ok {
+		if pct, ok := v.Value().(float64); ok {
+			m.info.Percent = int(pct)
+			changed = true
+		}
 	}
 
 	var seconds int64
+	var estimateFound bool
+
 	if v, ok := props["TimeToEmpty"]; ok {
 		seconds, _ = v.Value().(int64)
-	} else if v, ok := props["TimeToFull"]; ok {
-		seconds, _ = v.Value().(int64)
+		estimateFound = true
+	}
+	if v, ok := props["TimeToFull"]; ok {
+		if s, _ := v.Value().(int64); s > 0 {
+			seconds = s
+			estimateFound = true
+		}
 	}
 
-	if seconds > 0 {
-		m.info.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+	if estimateFound {
+		if seconds > 0 {
+			m.info.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+		} else {
+			m.info.Estimate = ""
+		}
+		changed = true
 	}
+
+	return changed
 }
 
 func (m *Monitor) Listen() (<-chan Stats, error) {
@@ -116,16 +158,8 @@ func (m *Monitor) Listen() (<-chan Stats, error) {
 
 		for sig := range signals {
 			if sig.Path == dbus.ObjectPath(upowerPath) && sig.Name == propsIface+"."+propsChangedSignal {
-				m.parseEstimate(sig.Body)
-
-				info, err := m.readFromSysfs()
-				if err != nil {
-					continue
-				}
-
-				if info != m.info {
-					m.info = info
-					ch <- info
+				if m.parseSignal(sig.Body) {
+					ch <- m.info
 				}
 			}
 		}
