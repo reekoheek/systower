@@ -3,15 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/reekoheek/systower/internal/battery"
 	"github.com/reekoheek/systower/internal/caffeine"
-	"github.com/reekoheek/systower/internal/notification"
-	"github.com/reekoheek/systower/internal/poller"
-	"github.com/reekoheek/systower/internal/sys"
 	"github.com/reekoheek/systower/internal/systower"
 )
 
@@ -35,27 +30,19 @@ func main() {
 }
 
 func runWatch() {
-	conn, err := dbus.SessionBus()
+	s, err := systower.New(
+		1*time.Second,  // clock
+		5*time.Second,  // cpu
+		5*time.Second,  // mem
+		60*time.Second, // storage
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer s.Close()
 
-	sysConn, err := dbus.SystemBus()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	defer sysConn.Close()
-
-	caff := caffeine.New(conn, createAdapter())
-	notif := notification.New(conn, "Systower")
-	bat := battery.New(sysConn)
-	sysMgr := sys.New(sysConn)
-	poll := poller.New(5*time.Second, 5*time.Second, 60*time.Second)
-
-	systower.New(caff, notif, bat, sysMgr, poll).Watch()
+	s.Watch()
 }
 
 func runCaffeine() {
@@ -71,7 +58,7 @@ func runCaffeine() {
 	}
 	defer conn.Close()
 
-	caff := caffeine.New(conn, createAdapter())
+	caff := caffeine.New(conn, caffeine.DetectAdapter())
 
 	switch os.Args[2] {
 	case "on":
@@ -88,11 +75,3 @@ func runCaffeine() {
 	}
 }
 
-func createAdapter() caffeine.Adapter {
-	if !sys.IsWayland() {
-		return caffeine.NewX11Adapter()
-	}
-
-	lockfile := filepath.Join(sys.GetRuntimeDir(), "swayidle.lock")
-	return caffeine.NewWaylandAdapter(lockfile)
-}

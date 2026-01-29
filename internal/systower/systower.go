@@ -6,17 +6,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/godbus/dbus/v5"
 	"github.com/reekoheek/systower/internal/battery"
 	"github.com/reekoheek/systower/internal/caffeine"
+	"github.com/reekoheek/systower/internal/clock"
 	"github.com/reekoheek/systower/internal/cpu"
 	"github.com/reekoheek/systower/internal/mem"
 	"github.com/reekoheek/systower/internal/notification"
-	"github.com/reekoheek/systower/internal/poller"
 	"github.com/reekoheek/systower/internal/storage"
 	"github.com/reekoheek/systower/internal/sys"
 )
 
 type Stats struct {
+	Clock    clock.Stats
 	Caffeine string
 	Battery  battery.Stats
 	CPU      cpu.Stats
@@ -25,16 +27,52 @@ type Stats struct {
 }
 
 type Systower struct {
-	caff   *caffeine.Caffeine
-	notif  *notification.Notification
-	batMon *battery.Monitor
-	sysMgr *sys.Sys
-	poller *poller.Poller
-	stats  Stats
+	conn      *dbus.Conn
+	sysConn   *dbus.Conn
+	caff      *caffeine.Caffeine
+	notif     *notification.Notification
+	batMon    *battery.Monitor
+	sysMgr    *sys.Sys
+	clockCh   <-chan clock.Stats
+	cpuCh     <-chan cpu.Stats
+	memCh     <-chan mem.Stats
+	storageCh <-chan storage.Stats
+	stats     Stats
 }
 
-func New(caff *caffeine.Caffeine, notif *notification.Notification, batMon *battery.Monitor, sysMgr *sys.Sys, poller *poller.Poller) *Systower {
-	return &Systower{caff: caff, notif: notif, batMon: batMon, sysMgr: sysMgr, poller: poller}
+func New(clockInterval, cpuInterval, memInterval, storageInterval time.Duration) (*Systower, error) {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return nil, fmt.Errorf("session bus: %w", err)
+	}
+
+	sysConn, err := dbus.SystemBus()
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("system bus: %w", err)
+	}
+
+	return &Systower{
+		conn:      conn,
+		sysConn:   sysConn,
+		caff:      caffeine.New(conn, caffeine.DetectAdapter()),
+		notif:     notification.New(conn, "Systower"),
+		batMon:    battery.New(sysConn),
+		sysMgr:    sys.New(sysConn),
+		clockCh:   clock.New().Listen(clockInterval),
+		cpuCh:     cpu.New().Listen(cpuInterval),
+		memCh:     mem.New().Listen(memInterval),
+		storageCh: storage.New("/").Listen(storageInterval),
+	}, nil
+}
+
+func (s *Systower) Close() {
+	if s.conn != nil {
+		s.conn.Close()
+	}
+	if s.sysConn != nil {
+		s.sysConn.Close()
+	}
 }
 
 func (s *Systower) Watch() {
@@ -49,8 +87,6 @@ func (s *Systower) Watch() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	pollerCh := s.poller.Listen()
 
 	for {
 		select {
@@ -76,13 +112,26 @@ func (s *Systower) Watch() {
 				return
 			}
 			s.stats.Caffeine = status
-		case stats, ok := <-pollerCh:
+		case stats, ok := <-s.clockCh:
 			if !ok {
 				return
 			}
-			s.stats.CPU = stats.CPU
-			s.stats.Mem = stats.Mem
-			s.stats.Storage = stats.Storage
+			s.stats.Clock = stats
+		case stats, ok := <-s.cpuCh:
+			if !ok {
+				return
+			}
+			s.stats.CPU = stats
+		case stats, ok := <-s.memCh:
+			if !ok {
+				return
+			}
+			s.stats.Mem = stats
+		case stats, ok := <-s.storageCh:
+			if !ok {
+				return
+			}
+			s.stats.Storage = stats
 		}
 		s.print()
 	}
@@ -94,6 +143,8 @@ func (s *Systower) Stats() Stats {
 
 func (s *Systower) print() {
 	var b strings.Builder
+	fmt.Fprintf(&b, "clock_date|string|%s\n", s.stats.Clock.Date())
+	fmt.Fprintf(&b, "clock_time|string|%s\n", s.stats.Clock.TimeStr())
 	fmt.Fprintf(&b, "caffeine|string|%s\n", s.stats.Caffeine)
 	fmt.Fprintf(&b, "bat_status|string|%s\n", s.stats.Battery.Status)
 	fmt.Fprintf(&b, "bat_percent|int|%d\n", s.stats.Battery.Percent)

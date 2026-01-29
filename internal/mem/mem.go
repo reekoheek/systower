@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Stats struct {
@@ -36,13 +37,13 @@ func (s Stats) TotalUsedInGB() float64 {
 	return float64(s.TotalUsed()) / 1024 / 1024
 }
 
-type Reader struct{}
+type Monitor struct{}
 
-func New() *Reader {
-	return &Reader{}
+func New() *Monitor {
+	return &Monitor{}
 }
 
-func (r *Reader) Read() Stats {
+func (r *Monitor) Read() Stats {
 	memTotal, memAvailable := r.readMemInfo()
 	swapTotal, swapUsed := r.readSwapFile()
 
@@ -56,7 +57,23 @@ func (r *Reader) Read() Stats {
 	}
 }
 
-func (r *Reader) readMemInfo() (total, available uint64) {
+func (r *Monitor) Listen(interval time.Duration) <-chan Stats {
+	ch := make(chan Stats)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		defer close(ch)
+
+		ch <- r.Read()
+
+		for range ticker.C {
+			ch <- r.Read()
+		}
+	}()
+	return ch
+}
+
+func (r *Monitor) readMemInfo() (total, available uint64) {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
 		return 0, 0
@@ -86,7 +103,7 @@ func (r *Reader) readMemInfo() (total, available uint64) {
 	return total, available
 }
 
-func (r *Reader) readSwapFile() (total, used uint64) {
+func (r *Monitor) readSwapFile() (total, used uint64) {
 	f, err := os.Open("/proc/swaps")
 	if err != nil {
 		return 0, 0

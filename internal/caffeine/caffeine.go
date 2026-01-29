@@ -2,8 +2,10 @@ package caffeine
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/reekoheek/systower/internal/sys"
 )
 
 const (
@@ -70,4 +72,12 @@ func (c *Caffeine) Listen() (<-chan string, error) {
 	}()
 
 	return statusCh, nil
+}
+
+func DetectAdapter() Adapter {
+	if !sys.IsWayland() {
+		return NewX11Adapter()
+	}
+	lockfile := filepath.Join(sys.GetRuntimeDir(), "swayidle.lock")
+	return NewWaylandAdapter(lockfile)
 }
