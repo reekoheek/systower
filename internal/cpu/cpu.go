@@ -21,12 +21,13 @@ func (s Stats) Percent() float64 {
 }
 
 type Monitor struct {
+	interval  time.Duration
 	prevIdle  uint64
 	prevTotal uint64
 }
 
-func New() *Monitor {
-	return &Monitor{}
+func New(interval time.Duration) *Monitor {
+	return &Monitor{interval: interval}
 }
 
 func (r *Monitor) Read() Stats {
@@ -44,10 +45,10 @@ func (r *Monitor) Read() Stats {
 	}
 }
 
-func (r *Monitor) Listen(interval time.Duration) <-chan Stats {
+func (r *Monitor) Listen() <-chan Stats {
 	ch := make(chan Stats)
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(r.interval)
 		defer ticker.Stop()
 		defer close(ch)
 

@@ -27,17 +27,17 @@ type Stats struct {
 }
 
 type Systower struct {
-	conn      *dbus.Conn
-	sysConn   *dbus.Conn
-	caff      *caffeine.Caffeine
-	notif     *notification.Notification
-	batMon    *battery.Monitor
-	sysMgr    *sys.Sys
-	clockCh   <-chan clock.Stats
-	cpuCh     <-chan cpu.Stats
-	memCh     <-chan mem.Stats
-	storageCh <-chan storage.Stats
-	stats     Stats
+	conn       *dbus.Conn
+	sysConn    *dbus.Conn
+	caff       *caffeine.Caffeine
+	notif      *notification.Notification
+	batMon     *battery.Monitor
+	sysMgr     *sys.Sys
+	clockMon   *clock.Monitor
+	cpuMon     *cpu.Monitor
+	memMon     *mem.Monitor
+	storageMon *storage.Monitor
+	stats      Stats
 }
 
 func New(clockInterval, cpuInterval, memInterval, storageInterval time.Duration) (*Systower, error) {
@@ -53,16 +53,16 @@ func New(clockInterval, cpuInterval, memInterval, storageInterval time.Duration)
 	}
 
 	return &Systower{
-		conn:      conn,
-		sysConn:   sysConn,
-		caff:      caffeine.New(conn, caffeine.DetectAdapter()),
-		notif:     notification.New(conn, "Systower"),
-		batMon:    battery.New(sysConn),
-		sysMgr:    sys.New(sysConn),
-		clockCh:   clock.New().Listen(clockInterval),
-		cpuCh:     cpu.New().Listen(cpuInterval),
-		memCh:     mem.New().Listen(memInterval),
-		storageCh: storage.New("/").Listen(storageInterval),
+		conn:       conn,
+		sysConn:    sysConn,
+		caff:       caffeine.New(conn, caffeine.DetectAdapter()),
+		notif:      notification.New(conn, "Systower"),
+		batMon:     battery.New(sysConn),
+		sysMgr:     sys.New(sysConn),
+		clockMon:   clock.New(clockInterval),
+		cpuMon:     cpu.New(cpuInterval),
+		memMon:     mem.New(memInterval),
+		storageMon: storage.New("/", storageInterval),
 	}, nil
 }
 
@@ -88,8 +88,15 @@ func (s *Systower) Watch() {
 		os.Exit(1)
 	}
 
+	clockCh := s.clockMon.Listen()
+	cpuCh := s.cpuMon.Listen()
+	memCh := s.memMon.Listen()
+	storageCh := s.storageMon.Listen()
+
 	debounce := time.NewTimer(0)
 	<-debounce.C // drain initial tick
+
+	var lastOutput string
 
 	for {
 		select {
@@ -115,28 +122,31 @@ func (s *Systower) Watch() {
 				return
 			}
 			s.stats.Caffeine = status
-		case stats, ok := <-s.clockCh:
+		case stats, ok := <-clockCh:
 			if !ok {
 				return
 			}
 			s.stats.Clock = stats
-		case stats, ok := <-s.cpuCh:
+		case stats, ok := <-cpuCh:
 			if !ok {
 				return
 			}
 			s.stats.CPU = stats
-		case stats, ok := <-s.memCh:
+		case stats, ok := <-memCh:
 			if !ok {
 				return
 			}
 			s.stats.Mem = stats
-		case stats, ok := <-s.storageCh:
+		case stats, ok := <-storageCh:
 			if !ok {
 				return
 			}
 			s.stats.Storage = stats
 		case <-debounce.C:
-			s.print()
+			if output := s.output(); output != lastOutput {
+				lastOutput = output
+				os.Stdout.WriteString(output)
+			}
 			continue
 		}
 		debounce.Reset(100 * time.Millisecond)
@@ -147,7 +157,7 @@ func (s *Systower) Stats() Stats {
 	return s.stats
 }
 
-func (s *Systower) print() {
+func (s *Systower) output() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "clock_date|string|%s\n", s.stats.Clock.Date())
 	fmt.Fprintf(&b, "clock_time|string|%s\n", s.stats.Clock.TimeStr())
@@ -160,5 +170,5 @@ func (s *Systower) print() {
 	fmt.Fprintf(&b, "mem_percent|float|%.5f\n", s.stats.Mem.Percent())
 	fmt.Fprintf(&b, "storage_percent|float|%.5f\n", s.stats.Storage.Percent())
 	b.WriteByte('\n')
-	os.Stdout.WriteString(b.String())
+	return b.String()
 }

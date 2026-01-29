@@ -14,20 +14,22 @@ func (s Stats) TimeStr() string {
 	return s.Time.Format("15:04:05")
 }
 
-type Monitor struct{}
+type Monitor struct {
+	interval time.Duration
+}
 
-func New() *Monitor {
-	return &Monitor{}
+func New(interval time.Duration) *Monitor {
+	return &Monitor{interval: interval}
 }
 
 func (r *Monitor) Read() Stats {
 	return Stats{Time: time.Now()}
 }
 
-func (r *Monitor) Listen(interval time.Duration) <-chan Stats {
+func (r *Monitor) Listen() <-chan Stats {
 	ch := make(chan Stats)
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(r.interval)
 		defer ticker.Stop()
 		defer close(ch)
 

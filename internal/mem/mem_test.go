@@ -1,9 +1,12 @@
 package mem
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestReader_Read(t *testing.T) {
-	r := New()
+	r := New(time.Second)
 	stats := r.Read()
 
 	toGB := func(kb uint64) float64 { return float64(kb) / 1024 / 1024 }

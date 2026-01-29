@@ -37,10 +37,12 @@ func (s Stats) TotalUsedInGB() float64 {
 	return float64(s.TotalUsed()) / 1024 / 1024
 }
 
-type Monitor struct{}
+type Monitor struct {
+	interval time.Duration
+}
 
-func New() *Monitor {
-	return &Monitor{}
+func New(interval time.Duration) *Monitor {
+	return &Monitor{interval: interval}
 }
 
 func (r *Monitor) Read() Stats {
@@ -57,10 +59,10 @@ func (r *Monitor) Read() Stats {
 	}
 }
 
-func (r *Monitor) Listen(interval time.Duration) <-chan Stats {
+func (r *Monitor) Listen() <-chan Stats {
 	ch := make(chan Stats)
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(r.interval)
 		defer ticker.Stop()
 		defer close(ch)
 
