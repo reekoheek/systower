@@ -30,17 +30,17 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestCaffeine_Status(t *testing.T) {
+func TestCaffeine_Read(t *testing.T) {
 	adapter := &mockAdapter{status: "off"}
 	c := New(nil, adapter)
 
-	if got := c.Status(); got.Active != false {
-		t.Errorf("Status().Active = %v, want false", got.Active)
+	if got := c.Read(); got != "off" {
+		t.Errorf("Read() = %v, want off", got)
 	}
 
 	adapter.status = "on"
-	if got := c.Status(); got.Active != true {
-		t.Errorf("Status().Active = %v, want true", got.Active)
+	if got := c.Read(); got != "on" {
+		t.Errorf("Read() = %v, want on", got)
 	}
 }
 

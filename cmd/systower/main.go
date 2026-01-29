@@ -85,11 +85,7 @@ func runCaffeine() {
 	case "toggle":
 		caff.Toggle()
 	case "status":
-		if caff.Status().Active {
-			fmt.Println("on")
-		} else {
-			fmt.Println("off")
-		}
+		fmt.Println(caff.Read())
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(1)

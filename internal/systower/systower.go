@@ -16,7 +16,7 @@ import (
 )
 
 type Stats struct {
-	Caffeine caffeine.Stats
+	Caffeine string
 	Battery  battery.Stats
 	CPU      cpu.Stats
 	Mem      mem.Stats
@@ -63,7 +63,7 @@ func (s *Systower) Watch() {
 			s.dirty = true
 
 			if info.Status != "charging" {
-				if s.caff.Status().Active && info.Percent < 15 {
+				if s.caff.Read() == "on" && info.Percent < 15 {
 					s.caff.Off()
 					s.notif.Send("Low battery, disable caffeine")
 				}
@@ -106,7 +106,7 @@ func (s *Systower) printIfChanged() {
 }
 
 func (s *Systower) print() {
-	fmt.Printf("caffeine|bool|%t\n", s.stats.Caffeine.Active)
+	fmt.Printf("caffeine|string|%s\n", s.stats.Caffeine)
 	fmt.Printf("bat_status|string|%s\n", s.stats.Battery.Status)
 	fmt.Printf("bat_percent|int|%d\n", s.stats.Battery.Percent)
 	fmt.Printf("bat_estimate|string|%s\n", s.stats.Battery.Estimate)
