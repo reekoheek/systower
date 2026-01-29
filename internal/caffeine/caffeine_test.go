@@ -96,11 +96,3 @@ func TestMockAdapter_OnOff(t *testing.T) {
 		t.Errorf("after Off(), Status() = %v, want off", got)
 	}
 }
-
-func TestCaffeine_Close(t *testing.T) {
-	adapter := &mockAdapter{status: "off"}
-	c := New(nil, adapter)
-
-	// Close should not panic
-	c.Close()
-}

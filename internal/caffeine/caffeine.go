@@ -24,9 +24,6 @@ func New(conn *dbus.Conn, adapter Adapter) *Caffeine {
 	}
 }
 
-func (c *Caffeine) Close() {
-}
-
 func (c *Caffeine) Status() string {
 	return c.adapter.Status()
 }
