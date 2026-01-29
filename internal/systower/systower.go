@@ -3,6 +3,7 @@ package systower
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/reekoheek/systower/internal/battery"
@@ -24,14 +25,12 @@ type Stats struct {
 }
 
 type Systower struct {
-	caff      *caffeine.Caffeine
-	notif     *notification.Notification
-	batMon    *battery.Monitor
-	sysMgr    *sys.Sys
-	poller    *poller.Poller
-	stats     Stats
-	prevStats Stats
-	dirty     bool
+	caff   *caffeine.Caffeine
+	notif  *notification.Notification
+	batMon *battery.Monitor
+	sysMgr *sys.Sys
+	poller *poller.Poller
+	stats  Stats
 }
 
 func New(caff *caffeine.Caffeine, notif *notification.Notification, batMon *battery.Monitor, sysMgr *sys.Sys, poller *poller.Poller) *Systower {
@@ -60,7 +59,6 @@ func (s *Systower) Watch() {
 				return
 			}
 			s.stats.Battery = info
-			s.dirty = true
 
 			if info.Status != "charging" {
 				if s.caff.Read() == "on" && info.Percent < 15 {
@@ -78,7 +76,6 @@ func (s *Systower) Watch() {
 				return
 			}
 			s.stats.Caffeine = status
-			s.dirty = true
 		case stats, ok := <-pollerCh:
 			if !ok {
 				return
@@ -86,9 +83,8 @@ func (s *Systower) Watch() {
 			s.stats.CPU = stats.CPU
 			s.stats.Mem = stats.Mem
 			s.stats.Storage = stats.Storage
-			s.dirty = true
 		}
-		s.printIfChanged()
+		s.print()
 	}
 }
 
@@ -96,23 +92,16 @@ func (s *Systower) Stats() Stats {
 	return s.stats
 }
 
-func (s *Systower) printIfChanged() {
-	if !s.dirty || s.stats == s.prevStats {
-		return
-	}
-	s.prevStats = s.stats
-	s.dirty = false
-	s.print()
-}
-
 func (s *Systower) print() {
-	fmt.Printf("caffeine|string|%s\n", s.stats.Caffeine)
-	fmt.Printf("bat_status|string|%s\n", s.stats.Battery.Status)
-	fmt.Printf("bat_percent|int|%d\n", s.stats.Battery.Percent)
-	fmt.Printf("bat_estimate|string|%s\n", s.stats.Battery.Estimate)
-	fmt.Printf("cpu_percent|float|%.5f\n", s.stats.CPU.Percent())
-	fmt.Printf("mem_used|float|%.5f\n", s.stats.Mem.TotalUsedInGB())
-	fmt.Printf("mem_percent|float|%.5f\n", s.stats.Mem.Percent())
-	fmt.Printf("storage_percent|float|%.5f\n", s.stats.Storage.Percent())
-	fmt.Println()
+	var b strings.Builder
+	fmt.Fprintf(&b, "caffeine|string|%s\n", s.stats.Caffeine)
+	fmt.Fprintf(&b, "bat_status|string|%s\n", s.stats.Battery.Status)
+	fmt.Fprintf(&b, "bat_percent|int|%d\n", s.stats.Battery.Percent)
+	fmt.Fprintf(&b, "bat_estimate|string|%s\n", s.stats.Battery.Estimate)
+	fmt.Fprintf(&b, "cpu_percent|float|%.5f\n", s.stats.CPU.Percent())
+	fmt.Fprintf(&b, "mem_used|float|%.5f\n", s.stats.Mem.TotalUsedInGB())
+	fmt.Fprintf(&b, "mem_percent|float|%.5f\n", s.stats.Mem.Percent())
+	fmt.Fprintf(&b, "storage_percent|float|%.5f\n", s.stats.Storage.Percent())
+	b.WriteByte('\n')
+	os.Stdout.WriteString(b.String())
 }
