@@ -19,28 +19,28 @@ func New() *Reader {
 }
 
 func (r *Reader) Read() Stats {
-	idle, total := r.readProcStat()
-	return Stats{Idle: idle, Total: total}
+	return r.readProcStat()
 }
 
-func (r *Reader) readProcStat() (idle, total uint64) {
+func (r *Reader) readProcStat() Stats {
 	f, err := os.Open("/proc/stat")
 	if err != nil {
-		return 0, 0
+		return Stats{}
 	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	if !scanner.Scan() {
-		return 0, 0
+		return Stats{}
 	}
 
 	// cpu  user nice system idle iowait irq softirq steal guest guest_nice
 	fields := strings.Fields(scanner.Text())
 	if len(fields) < 5 || fields[0] != "cpu" {
-		return 0, 0
+		return Stats{}
 	}
 
+	var stats Stats
 	// user nice system idle iowait irq softirq steal | guest guest_nice
 	// guest/guest_nice already included in user/nice, skip them
 	for i, field := range fields[1:] {
@@ -48,11 +48,11 @@ func (r *Reader) readProcStat() (idle, total uint64) {
 			break
 		}
 		val, _ := strconv.ParseUint(field, 10, 64)
-		total += val
+		stats.Total += val
 		if i == 3 || i == 4 { // idle + iowait
-			idle += val
+			stats.Idle += val
 		}
 	}
 
-	return idle, total
+	return stats
 }

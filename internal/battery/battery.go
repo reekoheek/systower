@@ -16,18 +16,18 @@ const (
 	propsChangedSignal = "PropertiesChanged"
 )
 
-type BatteryInfo struct {
+type Stats struct {
 	Status   string
 	Capacity int
 }
 
-type BatteryMonitor struct {
+type Monitor struct {
 	conn *dbus.Conn
-	info BatteryInfo
+	info Stats
 }
 
-func NewBatteryMonitor(conn *dbus.Conn) (*BatteryMonitor, error) {
-	m := &BatteryMonitor{conn: conn}
+func New(conn *dbus.Conn) (*Monitor, error) {
+	m := &Monitor{conn: conn}
 
 	info, err := m.readFromSysfs()
 	if err != nil {
@@ -38,29 +38,29 @@ func NewBatteryMonitor(conn *dbus.Conn) (*BatteryMonitor, error) {
 	return m, nil
 }
 
-func (m *BatteryMonitor) readFromSysfs() (BatteryInfo, error) {
+func (m *Monitor) readFromSysfs() (Stats, error) {
 	batPath := filepath.Join(sysfsPath, "BAT0")
 
 	status, err := m.readSysfsFile(filepath.Join(batPath, "status"))
 	if err != nil {
-		return BatteryInfo{}, fmt.Errorf("failed to read status: %w", err)
+		return Stats{}, fmt.Errorf("failed to read status: %w", err)
 	}
 
 	capacityStr, err := m.readSysfsFile(filepath.Join(batPath, "capacity"))
 	if err != nil {
-		return BatteryInfo{}, fmt.Errorf("failed to read capacity: %w", err)
+		return Stats{}, fmt.Errorf("failed to read capacity: %w", err)
 	}
 
 	var capacity int
 	fmt.Sscanf(capacityStr, "%d", &capacity)
 
-	return BatteryInfo{
+	return Stats{
 		Status:   strings.ToLower(status),
 		Capacity: capacity,
 	}, nil
 }
 
-func (m *BatteryMonitor) readSysfsFile(path string) (string, error) {
+func (m *Monitor) readSysfsFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -68,11 +68,11 @@ func (m *BatteryMonitor) readSysfsFile(path string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-func (m *BatteryMonitor) Info() BatteryInfo {
+func (m *Monitor) Info() Stats {
 	return m.info
 }
 
-func (m *BatteryMonitor) Listen() (<-chan BatteryInfo, error) {
+func (m *Monitor) Listen() (<-chan Stats, error) {
 	matchRule := fmt.Sprintf(
 		"type='signal',interface='%s',member='%s',path='%s'",
 		propsIface, propsChangedSignal, upowerPath,
@@ -82,7 +82,7 @@ func (m *BatteryMonitor) Listen() (<-chan BatteryInfo, error) {
 		return nil, fmt.Errorf("failed to add match rule: %w", err)
 	}
 
-	ch := make(chan BatteryInfo, 10)
+	ch := make(chan Stats, 10)
 
 	go func() {
 		signals := make(chan *dbus.Signal, 10)

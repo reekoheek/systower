@@ -14,11 +14,11 @@ import (
 type Systower struct {
 	caff   *caffeine.Caffeine
 	notif  *notification.Notification
-	batMon *battery.BatteryMonitor
+	batMon *battery.Monitor
 	sysMgr *sys.Sys
 }
 
-func New(caff *caffeine.Caffeine, notif *notification.Notification, batMon *battery.BatteryMonitor, sysMgr *sys.Sys) *Systower {
+func New(caff *caffeine.Caffeine, notif *notification.Notification, batMon *battery.Monitor, sysMgr *sys.Sys) *Systower {
 	return &Systower{caff: caff, notif: notif, batMon: batMon, sysMgr: sysMgr}
 }
 

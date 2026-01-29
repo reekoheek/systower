@@ -37,7 +37,7 @@ func main() {
 		defer sysConn.Close()
 
 		notif := notification.New(conn, "Systower")
-		bat, err := battery.NewBatteryMonitor(sysConn)
+		bat, err := battery.New(sysConn)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
