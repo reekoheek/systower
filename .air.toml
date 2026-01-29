@@ -4,7 +4,7 @@ tmp_dir = "tmp"
 [build]
   cmd = "go build -o ./tmp/systower ./cmd/systower"
   bin = "./tmp/systower"
-  args_bin = ["listen"]
+  args_bin = ["watch"]
   include_ext = ["go"]
   exclude_dir = ["tmp", "vendor"]
   delay = 1000
