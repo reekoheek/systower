@@ -2,17 +2,12 @@ package battery
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/godbus/dbus/v5"
 )
 
 const (
-	sysfsPath          = "/sys/class/power_supply"
 	upowerPath         = "/org/freedesktop/UPower/devices/battery_BAT0"
-	upowerDeviceIface  = "org.freedesktop.UPower.Device"
 	propsIface         = "org.freedesktop.DBus.Properties"
 	propsChangedSignal = "PropertiesChanged"
 )
@@ -28,47 +23,8 @@ type Monitor struct {
 	info Stats
 }
 
-func New(conn *dbus.Conn) (*Monitor, error) {
-	m := &Monitor{conn: conn}
-
-	info, err := m.readFromSysfs()
-	if err != nil {
-		return nil, err
-	}
-	m.info = info
-
-	return m, nil
-}
-
-func (m *Monitor) readFromSysfs() (Stats, error) {
-	batPath := filepath.Join(sysfsPath, "BAT0")
-
-	status, err := m.readSysfsFile(filepath.Join(batPath, "status"))
-	if err != nil {
-		return Stats{}, fmt.Errorf("failed to read status: %w", err)
-	}
-
-	capacityStr, err := m.readSysfsFile(filepath.Join(batPath, "capacity"))
-	if err != nil {
-		return Stats{}, fmt.Errorf("failed to read capacity: %w", err)
-	}
-
-	var capacity int
-	fmt.Sscanf(capacityStr, "%d", &capacity)
-
-	return Stats{
-		Status:   strings.ToLower(status),
-		Percent:  capacity,
-		Estimate: m.info.Estimate,
-	}, nil
-}
-
-func (m *Monitor) readSysfsFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
+func New(conn *dbus.Conn) *Monitor {
+	return &Monitor{conn: conn}
 }
 
 func (m *Monitor) Read() Stats {
@@ -138,6 +94,43 @@ func (m *Monitor) parseSignal(body []interface{}) bool {
 	return changed
 }
 
+func (m *Monitor) fetchInitial() error {
+	obj := m.conn.Object("org.freedesktop.UPower", dbus.ObjectPath(upowerPath))
+	var props map[string]dbus.Variant
+	if err := obj.Call(propsIface+".GetAll", 0, "org.freedesktop.UPower.Device").Store(&props); err != nil {
+		return err
+	}
+
+	if v, ok := props["State"]; ok {
+		if state, ok := v.Value().(uint32); ok {
+			if name, ok := stateNames[state]; ok {
+				m.info.Status = name
+			}
+		}
+	}
+
+	if v, ok := props["Percentage"]; ok {
+		if pct, ok := v.Value().(float64); ok {
+			m.info.Percent = int(pct)
+		}
+	}
+
+	var seconds int64
+	if v, ok := props["TimeToEmpty"]; ok {
+		seconds, _ = v.Value().(int64)
+	}
+	if v, ok := props["TimeToFull"]; ok {
+		if s, _ := v.Value().(int64); s > 0 {
+			seconds = s
+		}
+	}
+	if seconds > 0 {
+		m.info.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+	}
+
+	return nil
+}
+
 func (m *Monitor) Listen() (<-chan Stats, error) {
 	matchRule := fmt.Sprintf(
 		"type='signal',interface='%s',member='%s',path='%s'",
@@ -151,10 +144,13 @@ func (m *Monitor) Listen() (<-chan Stats, error) {
 	ch := make(chan Stats, 10)
 
 	go func() {
+		// Fetch initial state before listening for changes
+		if err := m.fetchInitial(); err == nil {
+			ch <- m.info
+		}
+
 		signals := make(chan *dbus.Signal, 10)
 		m.conn.Signal(signals)
-
-		ch <- m.info
 
 		for sig := range signals {
 			if sig.Path == dbus.ObjectPath(upowerPath) && sig.Name == propsIface+"."+propsChangedSignal {

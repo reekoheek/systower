@@ -51,13 +51,9 @@ func runWatch() {
 
 	caff := caffeine.New(conn, createAdapter())
 	notif := notification.New(conn, "Systower")
-	bat, err := battery.New(sysConn)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	bat := battery.New(sysConn)
 	sysMgr := sys.New(sysConn)
-	poll := poller.New(1*time.Second, 1*time.Second, 60*time.Second)
+	poll := poller.New(5*time.Second, 5*time.Second, 60*time.Second)
 
 	systower.New(caff, notif, bat, sysMgr, poll).Watch()
 }
