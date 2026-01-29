@@ -10,6 +10,7 @@ import (
 	"github.com/reekoheek/systower/internal/caffeine"
 	"github.com/reekoheek/systower/internal/notification"
 	"github.com/reekoheek/systower/internal/sys"
+	"github.com/reekoheek/systower/internal/systower"
 )
 
 func main() {
@@ -43,7 +44,7 @@ func main() {
 		}
 		sysMgr := sys.New(sysConn)
 
-		NewListen(caff, notif, bat, sysMgr).Execute()
+		systower.New(caff, notif, bat, sysMgr).Daemon()
 	case "on":
 		caff.On()
 	case "off":
