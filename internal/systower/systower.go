@@ -24,12 +24,14 @@ type Stats struct {
 }
 
 type Systower struct {
-	caff   *caffeine.Caffeine
-	notif  *notification.Notification
-	batMon *battery.Monitor
-	sysMgr *sys.Sys
-	poller *poller.Poller
-	stats  Stats
+	caff      *caffeine.Caffeine
+	notif     *notification.Notification
+	batMon    *battery.Monitor
+	sysMgr    *sys.Sys
+	poller    *poller.Poller
+	stats     Stats
+	prevStats Stats
+	dirty     bool
 }
 
 func New(caff *caffeine.Caffeine, notif *notification.Notification, batMon *battery.Monitor, sysMgr *sys.Sys, poller *poller.Poller) *Systower {
@@ -58,6 +60,7 @@ func (s *Systower) Watch() {
 				return
 			}
 			s.stats.Battery = info
+			s.dirty = true
 
 			if info.Status != "charging" {
 				if s.caff.Status().Active && info.Percent < 15 {
@@ -75,6 +78,7 @@ func (s *Systower) Watch() {
 				return
 			}
 			s.stats.Caffeine = status
+			s.dirty = true
 		case stats, ok := <-pollerCh:
 			if !ok {
 				return
@@ -82,13 +86,23 @@ func (s *Systower) Watch() {
 			s.stats.CPU = stats.CPU
 			s.stats.Mem = stats.Mem
 			s.stats.Storage = stats.Storage
+			s.dirty = true
 		}
-		s.print()
+		s.printIfChanged()
 	}
 }
 
 func (s *Systower) Stats() Stats {
 	return s.stats
+}
+
+func (s *Systower) printIfChanged() {
+	if !s.dirty || s.stats == s.prevStats {
+		return
+	}
+	s.prevStats = s.stats
+	s.dirty = false
+	s.print()
 }
 
 func (s *Systower) print() {

@@ -57,7 +57,7 @@ func runWatch() {
 		os.Exit(1)
 	}
 	sysMgr := sys.New(sysConn)
-	poll := poller.New(1*time.Second, 5*time.Second, 60*time.Second)
+	poll := poller.New(5*time.Second, 5*time.Second, 60*time.Second)
 
 	systower.New(caff, notif, bat, sysMgr, poll).Watch()
 }

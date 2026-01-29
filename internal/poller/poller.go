@@ -47,7 +47,7 @@ func (p *Poller) Listen() <-chan Stats {
 		defer ticker.Stop()
 		defer close(ch)
 
-		var stats Stats
+		var stats, prevStats Stats
 		tick := 0
 
 		for range ticker.C {
@@ -61,7 +61,10 @@ func (p *Poller) Listen() <-chan Stats {
 				stats.Storage = storageReader.Read()
 			}
 
-			ch <- stats
+			if stats != prevStats {
+				ch <- stats
+				prevStats = stats
+			}
 
 			tick++
 			if tick >= storageMult {
