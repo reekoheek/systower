@@ -50,6 +50,13 @@ func (p *Poller) Listen() <-chan Stats {
 		var stats, prevStats Stats
 		tick := 0
 
+		// Initial read
+		stats.CPU = cpuReader.Read()
+		stats.Mem = memReader.Read()
+		stats.Storage = storageReader.Read()
+		ch <- stats
+		prevStats = stats
+
 		for range ticker.C {
 			stats.CPU = cpuReader.Read()
 
