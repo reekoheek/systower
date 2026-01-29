@@ -7,35 +7,20 @@ import (
 	"strings"
 )
 
-type Reader struct {
-	prevIdle  uint64
-	prevTotal uint64
+type Stats struct {
+	Idle  uint64
+	Total uint64
 }
+
+type Reader struct{}
 
 func New() *Reader {
 	return &Reader{}
 }
 
-func (r *Reader) Read() float64 {
+func (r *Reader) Read() Stats {
 	idle, total := r.readProcStat()
-
-	if r.prevTotal == 0 {
-		r.prevIdle = idle
-		r.prevTotal = total
-		return 0
-	}
-
-	deltaIdle := idle - r.prevIdle
-	deltaTotal := total - r.prevTotal
-
-	r.prevIdle = idle
-	r.prevTotal = total
-
-	if deltaTotal == 0 {
-		return 0
-	}
-
-	return 100 * (1 - float64(deltaIdle)/float64(deltaTotal))
+	return Stats{Idle: idle, Total: total}
 }
 
 func (r *Reader) readProcStat() (idle, total uint64) {
