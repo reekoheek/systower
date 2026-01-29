@@ -68,7 +68,7 @@ func (m *Monitor) readSysfsFile(path string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-func (m *Monitor) Info() Stats {
+func (m *Monitor) Read() Stats {
 	return m.info
 }
 
