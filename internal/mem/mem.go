@@ -8,15 +8,32 @@ import (
 )
 
 type Stats struct {
-	All      uint64 // Mem + Swap (kB)
-	AllUsed  uint64 // MemUsed + SwapUsed (kB)
-	AllFree  uint64 // MemFree + SwapFree (kB)
 	Mem      uint64 // MemTotal (kB)
 	MemUsed  uint64 // MemTotal - MemAvailable (kB)
 	MemFree  uint64 // MemAvailable (kB)
 	Swap     uint64 // swapfile total (kB)
 	SwapUsed uint64 // swapfile used (kB)
 	SwapFree uint64 // swapfile free (kB)
+}
+
+func (s Stats) Total() uint64 {
+	return s.Mem + s.Swap
+}
+
+func (s Stats) TotalUsed() uint64 {
+	return s.MemUsed + s.SwapUsed
+}
+
+func (s Stats) Percent() float64 {
+	total := s.Total()
+	if total == 0 {
+		return 0
+	}
+	return float64(s.TotalUsed()) * 100 / float64(total)
+}
+
+func (s Stats) TotalUsedInGB() float64 {
+	return float64(s.TotalUsed()) / 1024 / 1024
 }
 
 type Reader struct{}
@@ -29,19 +46,13 @@ func (r *Reader) Read() Stats {
 	memTotal, memAvailable := r.readMemInfo()
 	swapTotal, swapUsed := r.readSwapFile()
 
-	memUsed := memTotal - memAvailable
-	swapFree := swapTotal - swapUsed
-
 	return Stats{
-		All:      memTotal + swapTotal,
-		AllUsed:  memUsed + swapUsed,
-		AllFree:  memAvailable + swapFree,
 		Mem:      memTotal,
-		MemUsed:  memUsed,
+		MemUsed:  memTotal - memAvailable,
 		MemFree:  memAvailable,
 		Swap:     swapTotal,
 		SwapUsed: swapUsed,
-		SwapFree: swapFree,
+		SwapFree: swapTotal - swapUsed,
 	}
 }
 

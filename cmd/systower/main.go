@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/reekoheek/systower/internal/battery"
 	"github.com/reekoheek/systower/internal/caffeine"
 	"github.com/reekoheek/systower/internal/notification"
+	"github.com/reekoheek/systower/internal/poller"
 	"github.com/reekoheek/systower/internal/sys"
 	"github.com/reekoheek/systower/internal/systower"
 )
@@ -43,8 +45,9 @@ func main() {
 			os.Exit(1)
 		}
 		sysMgr := sys.New(sysConn)
+		poll := poller.New(1*time.Second, 5*time.Second, 60*time.Second)
 
-		systower.New(caff, notif, bat, sysMgr).Daemon()
+		systower.New(caff, notif, bat, sysMgr, poll).Watch()
 	case "on":
 		caff.On()
 	case "off":

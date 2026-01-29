@@ -10,6 +10,13 @@ type Stats struct {
 	Free  uint64 // bytes
 }
 
+func (s Stats) Percent() float64 {
+	if s.Total == 0 {
+		return 0
+	}
+	return float64(s.Used) * 100 / float64(s.Total)
+}
+
 type Reader struct {
 	path string
 }

@@ -10,8 +10,8 @@ import (
 )
 
 func TestPoller_Start(t *testing.T) {
-	p := New(100*time.Millisecond, "/")
-	ch := p.Start()
+	p := New(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)
+	ch := p.Listen()
 
 	var prevCPU cpu.Stats
 

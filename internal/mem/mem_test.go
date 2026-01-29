@@ -14,9 +14,6 @@ func TestReader_Read(t *testing.T) {
 		return float64(used) / float64(total) * 100
 	}
 
-	t.Logf("all:  %12d kB (%6.2f GB)", stats.All, toGB(stats.All))
-	t.Logf("used: %12d kB (%6.2f GB) %5.1f%%", stats.AllUsed, toGB(stats.AllUsed), pct(stats.AllUsed, stats.All))
-	t.Logf("free: %12d kB (%6.2f GB) %5.1f%%", stats.AllFree, toGB(stats.AllFree), pct(stats.AllFree, stats.All))
 	t.Logf("mem:  %12d kB (%6.2f GB)", stats.Mem, toGB(stats.Mem))
 	t.Logf("used: %12d kB (%6.2f GB) %5.1f%%", stats.MemUsed, toGB(stats.MemUsed), pct(stats.MemUsed, stats.Mem))
 	t.Logf("free: %12d kB (%6.2f GB) %5.1f%%", stats.MemFree, toGB(stats.MemFree), pct(stats.MemFree, stats.Mem))
@@ -24,13 +21,13 @@ func TestReader_Read(t *testing.T) {
 	t.Logf("used: %12d kB (%6.2f GB) %5.1f%%", stats.SwapUsed, toGB(stats.SwapUsed), pct(stats.SwapUsed, stats.Swap))
 	t.Logf("free: %12d kB (%6.2f GB) %5.1f%%", stats.SwapFree, toGB(stats.SwapFree), pct(stats.SwapFree, stats.Swap))
 
-	if stats.All == 0 {
-		t.Error("all should be > 0")
+	if stats.Mem == 0 {
+		t.Error("mem should be > 0")
 	}
-	if stats.AllUsed > stats.All {
-		t.Errorf("allUsed (%d) should not exceed all (%d)", stats.AllUsed, stats.All)
+	if stats.MemUsed > stats.Mem {
+		t.Errorf("memUsed (%d) should not exceed mem (%d)", stats.MemUsed, stats.Mem)
 	}
-	if stats.All != stats.AllUsed+stats.AllFree {
-		t.Errorf("all (%d) should equal allUsed + allFree (%d)", stats.All, stats.AllUsed+stats.AllFree)
+	if stats.Mem != stats.MemUsed+stats.MemFree {
+		t.Errorf("mem (%d) should equal memUsed + memFree (%d)", stats.Mem, stats.MemUsed+stats.MemFree)
 	}
 }

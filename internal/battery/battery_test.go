@@ -22,7 +22,7 @@ func TestMonitor_Info(t *testing.T) {
 	}
 
 	t.Logf("status:   %s", stats.Status)
-	t.Logf("capacity: %d%%", stats.Capacity)
+	t.Logf("capacity: %d%%", stats.Percent)
 
 	validStatuses := map[string]bool{
 		"charging":     true,
@@ -34,7 +34,7 @@ func TestMonitor_Info(t *testing.T) {
 		t.Errorf("unexpected status: %s", stats.Status)
 	}
 
-	if stats.Capacity < 0 || stats.Capacity > 100 {
-		t.Errorf("capacity should be 0-100, got %d", stats.Capacity)
+	if stats.Percent < 0 || stats.Percent > 100 {
+		t.Errorf("capacity should be 0-100, got %d", stats.Percent)
 	}
 }

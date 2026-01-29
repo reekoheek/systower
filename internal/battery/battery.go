@@ -18,7 +18,8 @@ const (
 
 type Stats struct {
 	Status   string
-	Capacity int
+	Percent  int
+	Estimate string // HH:MM format, time to empty or full
 }
 
 type Monitor struct {
@@ -56,7 +57,8 @@ func (m *Monitor) readFromSysfs() (Stats, error) {
 
 	return Stats{
 		Status:   strings.ToLower(status),
-		Capacity: capacity,
+		Percent:  capacity,
+		Estimate: m.info.Estimate,
 	}, nil
 }
 
@@ -70,6 +72,28 @@ func (m *Monitor) readSysfsFile(path string) (string, error) {
 
 func (m *Monitor) Read() Stats {
 	return m.info
+}
+
+func (m *Monitor) parseEstimate(body []interface{}) {
+	if len(body) < 2 {
+		return
+	}
+
+	props, ok := body[1].(map[string]dbus.Variant)
+	if !ok {
+		return
+	}
+
+	var seconds int64
+	if v, ok := props["TimeToEmpty"]; ok {
+		seconds, _ = v.Value().(int64)
+	} else if v, ok := props["TimeToFull"]; ok {
+		seconds, _ = v.Value().(int64)
+	}
+
+	if seconds > 0 {
+		m.info.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+	}
 }
 
 func (m *Monitor) Listen() (<-chan Stats, error) {
@@ -92,6 +116,8 @@ func (m *Monitor) Listen() (<-chan Stats, error) {
 
 		for sig := range signals {
 			if sig.Path == dbus.ObjectPath(upowerPath) && sig.Name == propsIface+"."+propsChangedSignal {
+				m.parseEstimate(sig.Body)
+
 				info, err := m.readFromSysfs()
 				if err != nil {
 					continue

@@ -34,13 +34,13 @@ func TestCaffeine_Status(t *testing.T) {
 	adapter := &mockAdapter{status: "off"}
 	c := New(nil, adapter)
 
-	if got := c.Status(); got != "off" {
-		t.Errorf("Status() = %v, want off", got)
+	if got := c.Status(); got.Active != false {
+		t.Errorf("Status().Active = %v, want false", got.Active)
 	}
 
 	adapter.status = "on"
-	if got := c.Status(); got != "on" {
-		t.Errorf("Status() = %v, want on", got)
+	if got := c.Status(); got.Active != true {
+		t.Errorf("Status().Active = %v, want true", got.Active)
 	}
 }
 

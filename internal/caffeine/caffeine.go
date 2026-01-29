@@ -12,6 +12,10 @@ const (
 	dbusSignal    = "StatusChanged"
 )
 
+type Stats struct {
+	Active bool
+}
+
 type Caffeine struct {
 	conn    *dbus.Conn
 	adapter Adapter
@@ -24,8 +28,8 @@ func New(conn *dbus.Conn, adapter Adapter) *Caffeine {
 	}
 }
 
-func (c *Caffeine) Status() string {
-	return c.adapter.Status()
+func (c *Caffeine) Status() Stats {
+	return Stats{Active: c.adapter.Status() == "on"}
 }
 
 func (c *Caffeine) emitSignal() error {
@@ -43,14 +47,14 @@ func (c *Caffeine) Off() {
 }
 
 func (c *Caffeine) Toggle() {
-	if c.Status() == "on" {
+	if c.Status().Active {
 		c.Off()
 	} else {
 		c.On()
 	}
 }
 
-func (c *Caffeine) Listen() (<-chan string, error) {
+func (c *Caffeine) Listen() (<-chan Stats, error) {
 	matchRule := fmt.Sprintf("type='signal',interface='%s',member='%s'", dbusInterface, dbusSignal)
 	if err := c.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
 		return nil, fmt.Errorf("failed to add match rule: %w", err)
@@ -59,7 +63,7 @@ func (c *Caffeine) Listen() (<-chan string, error) {
 	signals := make(chan *dbus.Signal, 10)
 	c.conn.Signal(signals)
 
-	statusCh := make(chan string, 10)
+	statusCh := make(chan Stats, 10)
 
 	go func() {
 		statusCh <- c.Status()

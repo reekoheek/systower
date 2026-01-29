@@ -17,34 +17,55 @@ type Stats struct {
 }
 
 type Poller struct {
-	interval    time.Duration
-	storagePath string
+	cpuInterval     time.Duration
+	memInterval     time.Duration
+	storageInterval time.Duration
 }
 
-func New(interval time.Duration, storagePath string) *Poller {
+func New(cpuInterval, memInterval, storageInterval time.Duration) *Poller {
 	return &Poller{
-		interval:    interval,
-		storagePath: storagePath,
+		cpuInterval:     cpuInterval,
+		memInterval:     memInterval,
+		storageInterval: storageInterval,
 	}
 }
 
-func (p *Poller) Start() <-chan Stats {
+func (p *Poller) Listen() <-chan Stats {
 	ch := make(chan Stats)
 
 	go func() {
 		cpuReader := cpu.New()
 		memReader := mem.New()
-		storageReader := storage.New(p.storagePath)
+		storageReader := storage.New("/")
 
-		ticker := time.NewTicker(p.interval)
+		baseInterval := p.cpuInterval
+
+		memMult := max(1, int(p.memInterval/baseInterval))
+		storageMult := max(1, int(p.storageInterval/baseInterval))
+
+		ticker := time.NewTicker(baseInterval)
 		defer ticker.Stop()
 		defer close(ch)
 
+		var stats Stats
+		tick := 0
+
 		for range ticker.C {
-			ch <- Stats{
-				CPU:     cpuReader.Read(),
-				Mem:     memReader.Read(),
-				Storage: storageReader.Read(),
+			stats.CPU = cpuReader.Read()
+
+			if tick%memMult == 0 {
+				stats.Mem = memReader.Read()
+			}
+
+			if tick%storageMult == 0 {
+				stats.Storage = storageReader.Read()
+			}
+
+			ch <- stats
+
+			tick++
+			if tick >= storageMult {
+				tick = 0
 			}
 		}
 	}()

@@ -12,6 +12,13 @@ type Stats struct {
 	Total uint64
 }
 
+func (s Stats) Percent() float64 {
+	if s.Total == 0 {
+		return 0
+	}
+	return 100 - float64(s.Idle)*100/float64(s.Total)
+}
+
 type Reader struct{}
 
 func New() *Reader {
