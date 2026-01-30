@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -30,12 +34,20 @@ func main() {
 }
 
 func runWatch() {
+	fs := flag.NewFlagSet("watch", flag.ExitOnError)
+	clockInterval := fs.Duration("clock", 5*time.Second, "clock polling interval")
+	cpuInterval := fs.Duration("cpu", 5*time.Second, "cpu polling interval")
+	memInterval := fs.Duration("mem", 5*time.Second, "memory polling interval")
+	storageInterval := fs.Duration("storage", 300*time.Second, "storage polling interval")
+	debounce := fs.Duration("debounce", 100*time.Millisecond, "debounce interval")
+	fs.Parse(os.Args[2:])
+
 	s, err := systower.New(systower.Intervals{
-		Clock:    5 * time.Second,
-		CPU:      5 * time.Second,
-		Mem:      5 * time.Second,
-		Storage:  300 * time.Second,
-		Debounce: 100 * time.Millisecond,
+		Clock:    *clockInterval,
+		CPU:      *cpuInterval,
+		Mem:      *memInterval,
+		Storage:  *storageInterval,
+		Debounce: *debounce,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -43,7 +55,10 @@ func runWatch() {
 	}
 	defer s.Close()
 
-	s.Watch()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	s.Watch(ctx)
 }
 
 func runCaffeine() {

@@ -1,6 +1,7 @@
 package battery
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/godbus/dbus/v5"
@@ -131,7 +132,7 @@ func (m *Monitor) fetchInitial() error {
 	return nil
 }
 
-func (m *Monitor) Listen(callback func(Stats)) error {
+func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 	matchRule := fmt.Sprintf(
 		"type='signal',interface='%s',member='%s',path='%s'",
 		propsIface, propsChangedSignal, upowerPath,
@@ -150,10 +151,16 @@ func (m *Monitor) Listen(callback func(Stats)) error {
 		signals := make(chan *dbus.Signal, 10)
 		m.conn.Signal(signals)
 
-		for sig := range signals {
-			if sig.Path == dbus.ObjectPath(upowerPath) && sig.Name == propsIface+"."+propsChangedSignal {
-				if m.parseSignal(sig.Body) {
-					callback(m.info)
+		for {
+			select {
+			case <-ctx.Done():
+				m.conn.RemoveSignal(signals)
+				return
+			case sig := <-signals:
+				if sig.Path == dbus.ObjectPath(upowerPath) && sig.Name == propsIface+"."+propsChangedSignal {
+					if m.parseSignal(sig.Body) {
+						callback(m.info)
+					}
 				}
 			}
 		}

@@ -1,6 +1,7 @@
 package systower
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -98,11 +99,11 @@ func (s *Systower) Close() {
 	}
 }
 
-func (s *Systower) Watch() {
-	events := make(chan Event, 10)
+func (s *Systower) Watch(ctx context.Context) {
+	events := make(chan Event, 16)
 
 	// Battery monitor
-	if err := s.batMon.Listen(func(info battery.Stats) {
+	if err := s.batMon.Listen(ctx, func(info battery.Stats) {
 		events <- Event{Kind: BatteryUpdated, Payload: info}
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -110,7 +111,7 @@ func (s *Systower) Watch() {
 	}
 
 	// Caffeine monitor
-	if err := s.caff.Listen(func(status string) {
+	if err := s.caff.Listen(ctx, func(status string) {
 		events <- Event{Kind: CaffeineUpdated, Payload: status}
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -131,7 +132,7 @@ func (s *Systower) Watch() {
 	p.Register(s.intervals.Storage, func() {
 		events <- Event{Kind: StorageUpdated, Payload: s.storageReader.Read()}
 	})
-	p.Poll()
+	p.Poll(ctx)
 
 	// Main loop - single goroutine owns stats
 	var (
@@ -142,6 +143,11 @@ func (s *Systower) Watch() {
 
 	for {
 		select {
+		case <-ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
+			return
 		case e := <-events:
 			s.dispatch(e)
 			// Reset debounce timer

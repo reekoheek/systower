@@ -1,7 +1,5 @@
 package systower
 
-import "sync"
-
 type EventKind int
 
 const (
@@ -21,7 +19,6 @@ type Event struct {
 type EventHandler func(Event)
 
 type eventBus struct {
-	mu       sync.RWMutex
 	handlers map[EventKind][]EventHandler
 }
 
@@ -32,17 +29,11 @@ func newEventBus() *eventBus {
 }
 
 func (b *eventBus) on(kind EventKind, h EventHandler) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.handlers[kind] = append(b.handlers[kind], h)
 }
 
 func (b *eventBus) publish(e Event) {
-	b.mu.RLock()
-	handlers := b.handlers[e.Kind]
-	b.mu.RUnlock()
-
-	for _, h := range handlers {
+	for _, h := range b.handlers[e.Kind] {
 		h(e)
 	}
 }

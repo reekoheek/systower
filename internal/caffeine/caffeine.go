@@ -1,6 +1,7 @@
 package caffeine
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
@@ -52,7 +53,7 @@ func (c *Caffeine) Toggle() {
 	}
 }
 
-func (c *Caffeine) Listen(callback func(string)) error {
+func (c *Caffeine) Listen(ctx context.Context, callback func(string)) error {
 	matchRule := fmt.Sprintf("type='signal',interface='%s',member='%s'", dbusInterface, dbusSignal)
 	if err := c.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
 		return fmt.Errorf("failed to add match rule: %w", err)
@@ -63,8 +64,14 @@ func (c *Caffeine) Listen(callback func(string)) error {
 
 	go func() {
 		callback(c.Read())
-		for range signals {
-			callback(c.Read())
+		for {
+			select {
+			case <-ctx.Done():
+				c.conn.RemoveSignal(signals)
+				return
+			case <-signals:
+				callback(c.Read())
+			}
 		}
 	}()
 

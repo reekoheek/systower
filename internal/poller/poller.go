@@ -1,6 +1,9 @@
 package poller
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type Task struct {
 	interval time.Duration
@@ -41,7 +44,7 @@ func gcd(a, b time.Duration) time.Duration {
 	return a
 }
 
-func (p *Poller) Poll() {
+func (p *Poller) Poll(ctx context.Context) {
 	base := p.base()
 
 	go func() {
@@ -53,12 +56,17 @@ func (p *Poller) Poll() {
 		ticker := time.NewTicker(base)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			for _, t := range p.tasks {
-				t.elapsed += base
-				if t.elapsed >= t.interval {
-					t.fn()
-					t.elapsed = 0
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				for _, t := range p.tasks {
+					t.elapsed += base
+					if t.elapsed >= t.interval {
+						t.fn()
+						t.elapsed = 0
+					}
 				}
 			}
 		}

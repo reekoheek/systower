@@ -33,6 +33,19 @@ Outputs system stats to stdout in yambar-compatible format:
 systower watch
 ```
 
+With custom intervals:
+
+```bash
+systower watch -clock=1s -cpu=10s -mem=10s -storage=5m -debounce=200ms
+```
+
+Flags:
+- `-clock` - clock polling interval (default: 5s)
+- `-cpu` - CPU polling interval (default: 5s)
+- `-mem` - memory polling interval (default: 5s)
+- `-storage` - storage polling interval (default: 300s)
+- `-debounce` - debounce interval (default: 100ms)
+
 Output format:
 
 ```

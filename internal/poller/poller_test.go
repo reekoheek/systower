@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -41,7 +42,10 @@ func TestPoller_Poll(t *testing.T) {
 	p.Register(100*time.Millisecond, func() { count1++ })
 	p.Register(200*time.Millisecond, func() { count2++ })
 
-	p.Poll()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p.Poll(ctx)
 
 	// Wait for initial + a few ticks
 	time.Sleep(450 * time.Millisecond)
