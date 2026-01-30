@@ -9,6 +9,7 @@ const (
 	CPUUpdated
 	MemUpdated
 	StorageUpdated
+	VolumeUpdated
 )
 
 type Event struct {

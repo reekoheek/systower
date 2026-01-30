@@ -17,6 +17,7 @@ import (
 	"github.com/reekoheek/systower/internal/poller"
 	"github.com/reekoheek/systower/internal/storage"
 	"github.com/reekoheek/systower/internal/sys"
+	"github.com/reekoheek/systower/internal/volume"
 )
 
 type Stats struct {
@@ -26,6 +27,7 @@ type Stats struct {
 	CPU      cpu.Stats
 	Mem      mem.Stats
 	Storage  storage.Stats
+	Volume   volume.Stats
 }
 
 type Intervals struct {
@@ -42,6 +44,7 @@ type Systower struct {
 	caff    *caffeine.Caffeine
 	notif   *notification.Notification
 	batMon  *battery.Monitor
+	volMon  *volume.Monitor
 	sysMgr  *sys.Sys
 	stats   Stats
 	events  *eventBus
@@ -66,12 +69,20 @@ func New(intervals Intervals) (*Systower, error) {
 		return nil, fmt.Errorf("system bus: %w", err)
 	}
 
+	volMon, err := volume.New()
+	if err != nil {
+		conn.Close()
+		sysConn.Close()
+		return nil, fmt.Errorf("volume monitor: %w", err)
+	}
+
 	s := &Systower{
 		conn:          conn,
 		sysConn:       sysConn,
 		caff:          caffeine.New(conn, caffeine.DetectAdapter()),
 		notif:         notification.New(conn, "Systower"),
 		batMon:        battery.New(sysConn),
+		volMon:        volMon,
 		sysMgr:        sys.New(sysConn),
 		events:        newEventBus(),
 		clockReader:   clock.New(),
@@ -91,6 +102,9 @@ func (s *Systower) On(kind EventKind, h EventHandler) {
 }
 
 func (s *Systower) Close() {
+	if s.volMon != nil {
+		s.volMon.Close()
+	}
 	if s.conn != nil {
 		s.conn.Close()
 	}
@@ -113,6 +127,14 @@ func (s *Systower) Watch(ctx context.Context) {
 	// Caffeine monitor
 	if err := s.caff.Listen(ctx, func(status string) {
 		events <- Event{Kind: CaffeineUpdated, Payload: status}
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Volume monitor
+	if err := s.volMon.Listen(ctx, func(stats volume.Stats) {
+		events <- Event{Kind: VolumeUpdated, Payload: stats}
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -189,6 +211,8 @@ func (s *Systower) dispatch(e Event) {
 		s.stats.Mem = e.Payload.(mem.Stats)
 	case StorageUpdated:
 		s.stats.Storage = e.Payload.(storage.Stats)
+	case VolumeUpdated:
+		s.stats.Volume = e.Payload.(volume.Stats)
 	}
 
 	s.events.publish(e)
@@ -228,6 +252,8 @@ func (s *Systower) output() string {
 	fmt.Fprintf(&b, "mem_used|float|%.5f\n", s.stats.Mem.TotalUsedInGB())
 	fmt.Fprintf(&b, "mem_percent|float|%.5f\n", s.stats.Mem.Percent())
 	fmt.Fprintf(&b, "storage_percent|float|%.5f\n", s.stats.Storage.Percent())
+	fmt.Fprintf(&b, "vol_percent|int|%d\n", s.stats.Volume.Percent)
+	fmt.Fprintf(&b, "vol_muted|bool|%t\n", s.stats.Volume.Muted)
 	b.WriteByte('\n')
 	return b.String()
 }
