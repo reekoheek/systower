@@ -3,7 +3,8 @@ package systower
 type EventKind int
 
 const (
-	BatteryUpdated EventKind = iota
+	BacklightUpdated EventKind = iota
+	BatteryUpdated
 	CaffeineUpdated
 	ClockUpdated
 	CPUUpdated

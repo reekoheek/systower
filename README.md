@@ -49,6 +49,7 @@ Flags:
 Output format:
 
 ```
+backlight_percent|int|50
 clock_day|string|Fri
 clock_date|string|31 Jan
 clock_time|string|14:30
@@ -60,6 +61,8 @@ cpu_percent|float|12.34567
 mem_used|float|8.50000
 mem_percent|float|53.12500
 storage_percent|float|45.00000
+vol_percent|int|85
+vol_muted|bool|false
 ```
 
 ### Caffeine Control
@@ -104,17 +107,20 @@ bar:
 
 | Monitor | Source | Update Method |
 |---------|--------|---------------|
-| Clock | System time | Polling (5s) |
+| Backlight | `/sys/class/backlight`, udev | Event-driven |
+| Clock | System time | Polling (1s) |
 | Caffeine | D-Bus signal | Event-driven |
 | Battery | UPower D-Bus | Event-driven |
 | CPU | `/proc/stat` | Polling (5s) |
 | Memory | `/proc/meminfo`, `/proc/swaps` | Polling (5s) |
 | Storage | `syscall.Statfs` | Polling (300s) |
+| Volume | PulseAudio | Event-driven |
 
 ## Dependencies
 
 - D-Bus (for battery monitoring and notifications)
 - UPower (for battery information)
+- PulseAudio (for volume monitoring)
 - X11: `xset` command (for caffeine on X11)
 - Wayland: swayidle (for caffeine on Wayland)
 

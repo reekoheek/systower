@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/reekoheek/systower/internal/backlight"
 	"github.com/reekoheek/systower/internal/battery"
 	"github.com/reekoheek/systower/internal/caffeine"
 	"github.com/reekoheek/systower/internal/clock"
@@ -21,13 +22,14 @@ import (
 )
 
 type Stats struct {
-	Clock    clock.Stats
-	Caffeine string
-	Battery  battery.Stats
-	CPU      cpu.Stats
-	Mem      mem.Stats
-	Storage  storage.Stats
-	Volume   volume.Stats
+	Backlight backlight.Stats
+	Clock     clock.Stats
+	Caffeine  string
+	Battery   battery.Stats
+	CPU       cpu.Stats
+	Mem       mem.Stats
+	Storage   storage.Stats
+	Volume    volume.Stats
 }
 
 type Intervals struct {
@@ -43,6 +45,7 @@ type Systower struct {
 	sysConn *dbus.Conn
 	caff    *caffeine.Caffeine
 	notif   *notification.Notification
+	blMon   *backlight.Monitor
 	batMon  *battery.Monitor
 	volMon  *volume.Monitor
 	sysMgr  *sys.Sys
@@ -76,11 +79,15 @@ func New(intervals Intervals) (*Systower, error) {
 		return nil, fmt.Errorf("volume monitor: %w", err)
 	}
 
+	// Backlight monitor is optional (may not exist on desktops)
+	blMon, _ := backlight.New("")
+
 	s := &Systower{
 		conn:          conn,
 		sysConn:       sysConn,
 		caff:          caffeine.New(conn, caffeine.DetectAdapter()),
 		notif:         notification.New(conn, "Systower"),
+		blMon:         blMon,
 		batMon:        battery.New(sysConn),
 		volMon:        volMon,
 		sysMgr:        sys.New(sysConn),
@@ -102,6 +109,9 @@ func (s *Systower) On(kind EventKind, h EventHandler) {
 }
 
 func (s *Systower) Close() {
+	if s.blMon != nil {
+		s.blMon.Close()
+	}
 	if s.volMon != nil {
 		s.volMon.Close()
 	}
@@ -115,6 +125,15 @@ func (s *Systower) Close() {
 
 func (s *Systower) Watch(ctx context.Context) {
 	events := make(chan Event, 16)
+
+	// Backlight monitor (optional)
+	if s.blMon != nil {
+		if err := s.blMon.Listen(ctx, func(stats backlight.Stats) {
+			events <- Event{Kind: BacklightUpdated, Payload: stats}
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: backlight monitor: %v\n", err)
+		}
+	}
 
 	// Battery monitor
 	if err := s.batMon.Listen(ctx, func(info battery.Stats) {
@@ -199,6 +218,8 @@ func (s *Systower) Watch(ctx context.Context) {
 
 func (s *Systower) dispatch(e Event) {
 	switch e.Kind {
+	case BacklightUpdated:
+		s.stats.Backlight = e.Payload.(backlight.Stats)
 	case BatteryUpdated:
 		s.stats.Battery = e.Payload.(battery.Stats)
 	case CaffeineUpdated:
@@ -241,6 +262,7 @@ func (s *Systower) Stats() Stats {
 
 func (s *Systower) output() string {
 	var b strings.Builder
+	fmt.Fprintf(&b, "backlight_percent|int|%d\n", s.stats.Backlight.Percent())
 	fmt.Fprintf(&b, "clock_day|string|%s\n", s.stats.Clock.Day())
 	fmt.Fprintf(&b, "clock_date|string|%s\n", s.stats.Clock.Date())
 	fmt.Fprintf(&b, "clock_time|string|%s\n", s.stats.Clock.Time())
