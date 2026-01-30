@@ -40,7 +40,7 @@ systower watch -clock=1s -cpu=10s -mem=10s -storage=5m -debounce=200ms
 ```
 
 Flags:
-- `-clock` - clock polling interval (default: 5s)
+- `-clock` - clock polling interval (default: 1s)
 - `-cpu` - CPU polling interval (default: 5s)
 - `-mem` - memory polling interval (default: 5s)
 - `-storage` - storage polling interval (default: 300s)
