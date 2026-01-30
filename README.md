@@ -36,16 +36,17 @@ systower watch
 Output format:
 
 ```
-clock_date|string|Fri, 31 Jan
+clock_day|string|Fri
+clock_date|string|31 Jan
 clock_time|string|14:30
 caffeine|string|off
 bat_status|string|discharging
 bat_percent|int|75
 bat_estimate|string|02:30
-cpu_percent|float|0.15000
+cpu_percent|float|12.34567
 mem_used|float|8.50000
-mem_percent|float|0.53125
-storage_percent|float|0.45000
+mem_percent|float|53.12500
+storage_percent|float|45.00000
 ```
 
 ### Caffeine Control
@@ -90,11 +91,11 @@ bar:
 
 | Monitor | Source | Update Method |
 |---------|--------|---------------|
-| Clock | System time | Polling (1s) |
+| Clock | System time | Polling (5s) |
 | Caffeine | D-Bus signal | Event-driven |
 | Battery | UPower D-Bus | Event-driven |
 | CPU | `/proc/stat` | Polling (5s) |
-| Memory | `/proc/meminfo` | Polling (5s) |
+| Memory | `/proc/meminfo`, `/proc/swaps` | Polling (5s) |
 | Storage | `syscall.Statfs` | Polling (60s) |
 
 ## Dependencies
