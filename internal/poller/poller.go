@@ -41,18 +41,10 @@ func gcd(a, b time.Duration) time.Duration {
 	return a
 }
 
-func (p *Poller) Run() <-chan struct{} {
-	ch := make(chan struct{}, 1)
+func (p *Poller) Listen(notify func()) {
 	base := p.base()
 
 	go func() {
-		notify := func() {
-			select {
-			case ch <- struct{}{}:
-			default:
-			}
-		}
-
 		// Run all tasks immediately
 		for _, t := range p.tasks {
 			t.fn()
@@ -73,6 +65,4 @@ func (p *Poller) Run() <-chan struct{} {
 			notify()
 		}
 	}()
-
-	return ch
 }

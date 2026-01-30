@@ -37,24 +37,14 @@ func TestPoller_Base(t *testing.T) {
 func TestPoller_Run(t *testing.T) {
 	p := New()
 
-	var count1, count2 int
+	var count1, count2, notifyCount int
 	p.Register(100*time.Millisecond, func() { count1++ })
 	p.Register(200*time.Millisecond, func() { count2++ })
 
-	ch := p.Run()
+	p.Listen(func() { notifyCount++ })
 
 	// Wait for initial + a few ticks
 	time.Sleep(450 * time.Millisecond)
-
-	// Drain channel
-	for {
-		select {
-		case <-ch:
-		default:
-			goto done
-		}
-	}
-done:
 
 	// count1: initial + 4 ticks (100, 200, 300, 400) = 5
 	// count2: initial + 2 ticks (200, 400) = 3
@@ -63,5 +53,8 @@ done:
 	}
 	if count2 < 2 || count2 > 4 {
 		t.Errorf("count2 = %d, want ~3", count2)
+	}
+	if notifyCount < 4 {
+		t.Errorf("notifyCount = %d, want >= 4", notifyCount)
 	}
 }

@@ -131,22 +131,20 @@ func (m *Monitor) fetchInitial() error {
 	return nil
 }
 
-func (m *Monitor) Listen() (<-chan Stats, error) {
+func (m *Monitor) Listen(callback func(Stats)) error {
 	matchRule := fmt.Sprintf(
 		"type='signal',interface='%s',member='%s',path='%s'",
 		propsIface, propsChangedSignal, upowerPath,
 	)
 
 	if err := m.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
-		return nil, fmt.Errorf("failed to add match rule: %w", err)
+		return fmt.Errorf("failed to add match rule: %w", err)
 	}
-
-	ch := make(chan Stats, 10)
 
 	go func() {
 		// Fetch initial state before listening for changes
 		if err := m.fetchInitial(); err == nil {
-			ch <- m.info
+			callback(m.info)
 		}
 
 		signals := make(chan *dbus.Signal, 10)
@@ -155,11 +153,11 @@ func (m *Monitor) Listen() (<-chan Stats, error) {
 		for sig := range signals {
 			if sig.Path == dbus.ObjectPath(upowerPath) && sig.Name == propsIface+"."+propsChangedSignal {
 				if m.parseSignal(sig.Body) {
-					ch <- m.info
+					callback(m.info)
 				}
 			}
 		}
 	}()
 
-	return ch, nil
+	return nil
 }

@@ -52,26 +52,23 @@ func (c *Caffeine) Toggle() {
 	}
 }
 
-func (c *Caffeine) Listen() (<-chan string, error) {
+func (c *Caffeine) Listen(callback func(string)) error {
 	matchRule := fmt.Sprintf("type='signal',interface='%s',member='%s'", dbusInterface, dbusSignal)
 	if err := c.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
-		return nil, fmt.Errorf("failed to add match rule: %w", err)
+		return fmt.Errorf("failed to add match rule: %w", err)
 	}
 
 	signals := make(chan *dbus.Signal, 10)
 	c.conn.Signal(signals)
 
-	statusCh := make(chan string, 10)
-
 	go func() {
-		statusCh <- c.Read()
+		callback(c.Read())
 		for range signals {
-			statusCh <- c.Read()
+			callback(c.Read())
 		}
-		close(statusCh)
 	}()
 
-	return statusCh, nil
+	return nil
 }
 
 func DetectAdapter() Adapter {

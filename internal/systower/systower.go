@@ -13,6 +13,7 @@ import (
 	"github.com/reekoheek/systower/internal/cpu"
 	"github.com/reekoheek/systower/internal/mem"
 	"github.com/reekoheek/systower/internal/notification"
+	"github.com/reekoheek/systower/internal/notifier"
 	"github.com/reekoheek/systower/internal/poller"
 	"github.com/reekoheek/systower/internal/storage"
 	"github.com/reekoheek/systower/internal/sys"
@@ -87,64 +88,53 @@ func (s *Systower) Close() {
 }
 
 func (s *Systower) Watch() {
-	batCh, err := s.batMon.Listen()
-	if err != nil {
+	n := notifier.New(100 * time.Millisecond)
+
+	// Battery monitor with business logic
+	if err := s.batMon.Listen(func(info battery.Stats) {
+		s.stats.Battery = info
+
+		if info.Status != "charging" {
+			if s.caff.Read() == "on" && info.Percent < 15 {
+				s.caff.Off()
+				s.notif.Send("Low battery, disable caffeine")
+			}
+			if info.Percent < 5 {
+				s.notif.Send("Battery almost drained, have a nice sleep")
+				time.Sleep(5 * time.Second)
+				s.sysMgr.Poweroff()
+			}
+		}
+
+		n.Notify()
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	caffCh, err := s.caff.Listen()
-	if err != nil {
+	// Caffeine monitor
+	if err := s.caff.Listen(func(status string) {
+		s.stats.Caffeine = status
+		n.Notify()
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
+	// Polling readers
 	p := poller.New()
 	p.Register(s.clockInterval, func() { s.stats.Clock = s.clockReader.Read() })
 	p.Register(s.cpuInterval, func() { s.stats.CPU = s.cpuReader.Read() })
 	p.Register(s.memInterval, func() { s.stats.Mem = s.memReader.Read() })
 	p.Register(s.storageInterval, func() { s.stats.Storage = s.storageReader.Read() })
-	pollCh := p.Run()
-
-	debounce := time.NewTimer(0)
-	<-debounce.C // drain initial tick
+	p.Listen(n.Notify)
 
 	var lastOutput string
-
-	for {
-		select {
-		case info, ok := <-batCh:
-			if !ok {
-				return
-			}
-			s.stats.Battery = info
-
-			if info.Status != "charging" {
-				if s.caff.Read() == "on" && info.Percent < 15 {
-					s.caff.Off()
-					s.notif.Send("Low battery, disable caffeine")
-				}
-				if info.Percent < 5 {
-					s.notif.Send("Battery almost drained, have a nice sleep")
-					time.Sleep(5 * time.Second)
-					s.sysMgr.Poweroff()
-				}
-			}
-		case status, ok := <-caffCh:
-			if !ok {
-				return
-			}
-			s.stats.Caffeine = status
-		case <-pollCh:
-			// Stats updated by poller callbacks
-		case <-debounce.C:
-			if output := s.output(); output != lastOutput {
-				lastOutput = output
-				os.Stdout.WriteString(output)
-			}
-			continue
+	for range n.Notified() {
+		if output := s.output(); output != lastOutput {
+			lastOutput = output
+			os.Stdout.WriteString(output)
 		}
-		debounce.Reset(100 * time.Millisecond)
 	}
 }
 
