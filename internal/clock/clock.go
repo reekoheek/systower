@@ -3,15 +3,19 @@ package clock
 import "time"
 
 type Stats struct {
-	Time time.Time
+	Unix int64
+}
+
+func (s Stats) Day() string {
+	return time.Unix(s.Unix, 0).Format("Mon")
 }
 
 func (s Stats) Date() string {
-	return s.Time.Format("Mon, 2006-01-02")
+	return time.Unix(s.Unix, 0).Format("2006-01-02")
 }
 
-func (s Stats) TimeStr() string {
-	return s.Time.Format("15:04:05")
+func (s Stats) Time() string {
+	return time.Unix(s.Unix, 0).Format("15:04:05")
 }
 
 type Reader struct{}
@@ -21,5 +25,5 @@ func New() *Reader {
 }
 
 func (r *Reader) Read() Stats {
-	return Stats{Time: time.Now()}
+	return Stats{Unix: time.Now().Unix()}
 }

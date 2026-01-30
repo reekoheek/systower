@@ -34,14 +34,14 @@ func TestPoller_Base(t *testing.T) {
 	}
 }
 
-func TestPoller_Run(t *testing.T) {
+func TestPoller_Poll(t *testing.T) {
 	p := New()
 
-	var count1, count2, notifyCount int
+	var count1, count2 int
 	p.Register(100*time.Millisecond, func() { count1++ })
 	p.Register(200*time.Millisecond, func() { count2++ })
 
-	p.Listen(func() { notifyCount++ })
+	p.Poll()
 
 	// Wait for initial + a few ticks
 	time.Sleep(450 * time.Millisecond)
@@ -53,8 +53,5 @@ func TestPoller_Run(t *testing.T) {
 	}
 	if count2 < 2 || count2 > 4 {
 		t.Errorf("count2 = %d, want ~3", count2)
-	}
-	if notifyCount < 4 {
-		t.Errorf("notifyCount = %d, want >= 4", notifyCount)
 	}
 }

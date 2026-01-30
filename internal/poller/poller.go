@@ -41,7 +41,7 @@ func gcd(a, b time.Duration) time.Duration {
 	return a
 }
 
-func (p *Poller) Listen(notify func()) {
+func (p *Poller) Poll() {
 	base := p.base()
 
 	go func() {
@@ -49,7 +49,6 @@ func (p *Poller) Listen(notify func()) {
 		for _, t := range p.tasks {
 			t.fn()
 		}
-		notify()
 
 		ticker := time.NewTicker(base)
 		defer ticker.Stop()
@@ -62,7 +61,6 @@ func (p *Poller) Listen(notify func()) {
 					t.elapsed = 0
 				}
 			}
-			notify()
 		}
 	}()
 }

@@ -30,12 +30,13 @@ func main() {
 }
 
 func runWatch() {
-	s, err := systower.New(
-		1*time.Second,  // clock
-		5*time.Second,  // cpu
-		5*time.Second,  // mem
-		60*time.Second, // storage
-	)
+	s, err := systower.New(systower.Intervals{
+		Clock:    5 * time.Second,
+		CPU:      5 * time.Second,
+		Mem:      5 * time.Second,
+		Storage:  60 * time.Second,
+		Debounce: 100 * time.Millisecond,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -74,4 +75,3 @@ func runCaffeine() {
 		os.Exit(1)
 	}
 }
-
