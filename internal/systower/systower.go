@@ -135,10 +135,9 @@ func (s *Systower) Watch() {
 
 	// Main loop - single goroutine owns stats
 	var (
-		lastOutput string
-		timer      *time.Timer
-		timerC     <-chan time.Time
-		pending    bool
+		lastStats Stats
+		timer     *time.Timer
+		timerC    <-chan time.Time
 	)
 
 	for {
@@ -158,15 +157,11 @@ func (s *Systower) Watch() {
 				}
 				timer.Reset(s.intervals.Debounce)
 			}
-			pending = true
 
 		case <-timerC:
-			if pending {
-				if output := s.output(); output != lastOutput {
-					lastOutput = output
-					os.Stdout.WriteString(output)
-				}
-				pending = false
+			if s.stats != lastStats {
+				lastStats = s.stats
+				os.Stdout.WriteString(s.output())
 			}
 			timer = nil
 			timerC = nil
