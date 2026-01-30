@@ -34,7 +34,7 @@ func runWatch() {
 		Clock:    5 * time.Second,
 		CPU:      5 * time.Second,
 		Mem:      5 * time.Second,
-		Storage:  60 * time.Second,
+		Storage:  300 * time.Second,
 		Debounce: 100 * time.Millisecond,
 	})
 	if err != nil {

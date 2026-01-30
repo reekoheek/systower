@@ -16,6 +16,7 @@ Target: lightweight system app with battery optimization.
 
 ## Medium Priority
 
+- [x] Cache MemTotal in memory reader (read once at init)
 - [ ] Reduce file I/O allocations (reuse scanner/buffer for `/proc/*` reads)
 - [ ] Extract duplicated battery parsing logic
 - [ ] Reuse timer instead of creating new one per event
@@ -24,4 +25,4 @@ Target: lightweight system app with battery optimization.
 
 - [ ] Use `sync.Pool` for `strings.Builder` in output()
 - [ ] Cache formatted clock strings (avoid redundant `time.Unix()` calls)
-- [ ] Increase storage polling interval (60s → 300s)
+- [x] Increase storage polling interval (60s → 300s)

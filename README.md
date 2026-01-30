@@ -96,7 +96,7 @@ bar:
 | Battery | UPower D-Bus | Event-driven |
 | CPU | `/proc/stat` | Polling (5s) |
 | Memory | `/proc/meminfo`, `/proc/swaps` | Polling (5s) |
-| Storage | `syscall.Statfs` | Polling (60s) |
+| Storage | `syscall.Statfs` | Polling (300s) |
 
 ## Dependencies
 
