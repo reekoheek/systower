@@ -44,7 +44,7 @@ Flags:
 - `-cpu` - CPU polling interval (default: 5s)
 - `-mem` - memory polling interval (default: 5s)
 - `-storage` - storage polling interval (default: 300s)
-- `-throttle` - throttle interval for output batching (default: 200ms)
+- `-throttle` - throttle interval for output batching (default: 50ms)
 
 Output format:
 
