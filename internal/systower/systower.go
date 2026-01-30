@@ -37,7 +37,7 @@ type Intervals struct {
 	CPU      time.Duration
 	Mem      time.Duration
 	Storage  time.Duration
-	Debounce time.Duration
+	Throttle time.Duration
 }
 
 type Systower struct {
@@ -191,20 +191,11 @@ func (s *Systower) Watch(ctx context.Context) {
 			return
 		case e := <-events:
 			s.dispatch(e)
-			// Reset debounce timer
+			// Throttle: start timer only if not already pending
 			if timer == nil {
-				timer = time.NewTimer(s.intervals.Debounce)
+				timer = time.NewTimer(s.intervals.Throttle)
 				timerC = timer.C
-			} else {
-				if !timer.Stop() {
-					select {
-					case <-timerC:
-					default:
-					}
-				}
-				timer.Reset(s.intervals.Debounce)
 			}
-
 		case <-timerC:
 			if s.stats != lastStats {
 				lastStats = s.stats

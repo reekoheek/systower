@@ -11,7 +11,7 @@ func TestNew(t *testing.T) {
 		CPU:      time.Second,
 		Mem:      time.Second,
 		Storage:  time.Second,
-		Debounce: 100 * time.Millisecond,
+		Throttle: 100 * time.Millisecond,
 	})
 
 	if err != nil {

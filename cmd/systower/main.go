@@ -39,7 +39,7 @@ func runWatch() {
 	cpuInterval := fs.Duration("cpu", 5*time.Second, "cpu polling interval")
 	memInterval := fs.Duration("mem", 5*time.Second, "memory polling interval")
 	storageInterval := fs.Duration("storage", 300*time.Second, "storage polling interval")
-	debounce := fs.Duration("debounce", 100*time.Millisecond, "debounce interval")
+	throttle := fs.Duration("throttle", 200*time.Millisecond, "throttle interval")
 	fs.Parse(os.Args[2:])
 
 	s, err := systower.New(systower.Intervals{
@@ -47,7 +47,7 @@ func runWatch() {
 		CPU:      *cpuInterval,
 		Mem:      *memInterval,
 		Storage:  *storageInterval,
-		Debounce: *debounce,
+		Throttle: *throttle,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
