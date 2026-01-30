@@ -2,13 +2,10 @@
 
 package storage
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
 func TestReader_Read(t *testing.T) {
-	r := New("/", time.Second)
+	r := New("/")
 	stats := r.Read()
 
 	toGB := func(b uint64) float64 { return float64(b) / 1024 / 1024 / 1024 }

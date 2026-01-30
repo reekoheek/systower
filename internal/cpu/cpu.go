@@ -5,7 +5,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type Stats struct {
@@ -20,17 +19,16 @@ func (s Stats) Percent() float64 {
 	return 100 - float64(s.Idle)*100/float64(s.Total)
 }
 
-type Monitor struct {
-	interval  time.Duration
+type Reader struct {
 	prevIdle  uint64
 	prevTotal uint64
 }
 
-func New(interval time.Duration) *Monitor {
-	return &Monitor{interval: interval}
+func New() *Reader {
+	return &Reader{}
 }
 
-func (r *Monitor) Read() Stats {
+func (r *Reader) Read() Stats {
 	idle, total := r.readProcStat()
 
 	deltaIdle := idle - r.prevIdle
@@ -45,23 +43,7 @@ func (r *Monitor) Read() Stats {
 	}
 }
 
-func (r *Monitor) Listen() <-chan Stats {
-	ch := make(chan Stats)
-	go func() {
-		ticker := time.NewTicker(r.interval)
-		defer ticker.Stop()
-		defer close(ch)
-
-		ch <- r.Read()
-
-		for range ticker.C {
-			ch <- r.Read()
-		}
-	}()
-	return ch
-}
-
-func (r *Monitor) readProcStat() (idle, total uint64) {
+func (r *Reader) readProcStat() (idle, total uint64) {
 	f, err := os.Open("/proc/stat")
 	if err != nil {
 		return 0, 0

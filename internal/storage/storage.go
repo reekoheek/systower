@@ -2,10 +2,7 @@
 
 package storage
 
-import (
-	"syscall"
-	"time"
-)
+import "syscall"
 
 type Stats struct {
 	Total uint64 // bytes
@@ -20,32 +17,15 @@ func (s Stats) Percent() float64 {
 	return float64(s.Used) * 100 / float64(s.Total)
 }
 
-type Monitor struct {
-	path     string
-	interval time.Duration
+type Reader struct {
+	path string
 }
 
-func New(path string, interval time.Duration) *Monitor {
-	return &Monitor{path: path, interval: interval}
+func New(path string) *Reader {
+	return &Reader{path: path}
 }
 
-func (r *Monitor) Listen() <-chan Stats {
-	ch := make(chan Stats)
-	go func() {
-		ticker := time.NewTicker(r.interval)
-		defer ticker.Stop()
-		defer close(ch)
-
-		ch <- r.Read()
-
-		for range ticker.C {
-			ch <- r.Read()
-		}
-	}()
-	return ch
-}
-
-func (r *Monitor) Read() Stats {
+func (r *Reader) Read() Stats {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(r.path, &stat); err != nil {
 		return Stats{}

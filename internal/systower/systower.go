@@ -13,6 +13,7 @@ import (
 	"github.com/reekoheek/systower/internal/cpu"
 	"github.com/reekoheek/systower/internal/mem"
 	"github.com/reekoheek/systower/internal/notification"
+	"github.com/reekoheek/systower/internal/poller"
 	"github.com/reekoheek/systower/internal/storage"
 	"github.com/reekoheek/systower/internal/sys"
 )
@@ -27,17 +28,23 @@ type Stats struct {
 }
 
 type Systower struct {
-	conn       *dbus.Conn
-	sysConn    *dbus.Conn
-	caff       *caffeine.Caffeine
-	notif      *notification.Notification
-	batMon     *battery.Monitor
-	sysMgr     *sys.Sys
-	clockMon   *clock.Monitor
-	cpuMon     *cpu.Monitor
-	memMon     *mem.Monitor
-	storageMon *storage.Monitor
-	stats      Stats
+	conn    *dbus.Conn
+	sysConn *dbus.Conn
+	caff    *caffeine.Caffeine
+	notif   *notification.Notification
+	batMon  *battery.Monitor
+	sysMgr  *sys.Sys
+	stats   Stats
+
+	clockReader   *clock.Reader
+	cpuReader     *cpu.Reader
+	memReader     *mem.Reader
+	storageReader *storage.Reader
+
+	clockInterval   time.Duration
+	cpuInterval     time.Duration
+	memInterval     time.Duration
+	storageInterval time.Duration
 }
 
 func New(clockInterval, cpuInterval, memInterval, storageInterval time.Duration) (*Systower, error) {
@@ -53,16 +60,20 @@ func New(clockInterval, cpuInterval, memInterval, storageInterval time.Duration)
 	}
 
 	return &Systower{
-		conn:       conn,
-		sysConn:    sysConn,
-		caff:       caffeine.New(conn, caffeine.DetectAdapter()),
-		notif:      notification.New(conn, "Systower"),
-		batMon:     battery.New(sysConn),
-		sysMgr:     sys.New(sysConn),
-		clockMon:   clock.New(clockInterval),
-		cpuMon:     cpu.New(cpuInterval),
-		memMon:     mem.New(memInterval),
-		storageMon: storage.New("/", storageInterval),
+		conn:            conn,
+		sysConn:         sysConn,
+		caff:            caffeine.New(conn, caffeine.DetectAdapter()),
+		notif:           notification.New(conn, "Systower"),
+		batMon:          battery.New(sysConn),
+		sysMgr:          sys.New(sysConn),
+		clockReader:     clock.New(),
+		cpuReader:       cpu.New(),
+		memReader:       mem.New(),
+		storageReader:   storage.New("/"),
+		clockInterval:   clockInterval,
+		cpuInterval:     cpuInterval,
+		memInterval:     memInterval,
+		storageInterval: storageInterval,
 	}, nil
 }
 
@@ -88,10 +99,12 @@ func (s *Systower) Watch() {
 		os.Exit(1)
 	}
 
-	clockCh := s.clockMon.Listen()
-	cpuCh := s.cpuMon.Listen()
-	memCh := s.memMon.Listen()
-	storageCh := s.storageMon.Listen()
+	p := poller.New()
+	p.Register(s.clockInterval, func() { s.stats.Clock = s.clockReader.Read() })
+	p.Register(s.cpuInterval, func() { s.stats.CPU = s.cpuReader.Read() })
+	p.Register(s.memInterval, func() { s.stats.Mem = s.memReader.Read() })
+	p.Register(s.storageInterval, func() { s.stats.Storage = s.storageReader.Read() })
+	pollCh := p.Run()
 
 	debounce := time.NewTimer(0)
 	<-debounce.C // drain initial tick
@@ -122,26 +135,8 @@ func (s *Systower) Watch() {
 				return
 			}
 			s.stats.Caffeine = status
-		case stats, ok := <-clockCh:
-			if !ok {
-				return
-			}
-			s.stats.Clock = stats
-		case stats, ok := <-cpuCh:
-			if !ok {
-				return
-			}
-			s.stats.CPU = stats
-		case stats, ok := <-memCh:
-			if !ok {
-				return
-			}
-			s.stats.Mem = stats
-		case stats, ok := <-storageCh:
-			if !ok {
-				return
-			}
-			s.stats.Storage = stats
+		case <-pollCh:
+			// Stats updated by poller callbacks
 		case <-debounce.C:
 			if output := s.output(); output != lastOutput {
 				lastOutput = output

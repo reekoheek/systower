@@ -1,0 +1,109 @@
+# Systower
+
+A lightweight system monitor daemon for Linux status bars. Designed to work with [yambar](https://codeberg.org/dnkl/yambar) but outputs a simple key-value format that can be adapted for other status bars.
+
+## Features
+
+- **Event-driven** - Uses D-Bus signals for battery and caffeine changes (no polling)
+- **Efficient polling** - CPU, memory, and storage use configurable intervals
+- **Smart power management**:
+  - Auto-disables caffeine when battery drops below 15%
+  - Sends notification and powers off when battery drops below 5%
+- **Cross-platform** - Supports both X11 and Wayland for screen saver inhibition
+
+## Installation
+
+```bash
+go install github.com/reekoheek/systower/cmd/systower@latest
+```
+
+Or build from source:
+
+```bash
+go build -o systower ./cmd/systower
+```
+
+## Usage
+
+### Watch Mode
+
+Outputs system stats to stdout in yambar-compatible format:
+
+```bash
+systower watch
+```
+
+Output format:
+
+```
+clock_date|string|Fri, 31 Jan
+clock_time|string|14:30
+caffeine|string|off
+bat_status|string|discharging
+bat_percent|int|75
+bat_estimate|string|02:30
+cpu_percent|float|0.15000
+mem_used|float|8.50000
+mem_percent|float|0.53125
+storage_percent|float|0.45000
+```
+
+### Caffeine Control
+
+Inhibit screen saver / idle sleep:
+
+```bash
+systower caffeine on       # Enable caffeine
+systower caffeine off      # Disable caffeine
+systower caffeine toggle   # Toggle state
+systower caffeine status   # Print current state (on/off)
+```
+
+On X11, uses `xset` to disable DPMS and screen saver.
+On Wayland, creates a lock file at `$XDG_RUNTIME_DIR/swayidle.lock` (configure swayidle to check this file).
+
+## Yambar Configuration
+
+Example yambar configuration using systower:
+
+```yaml
+bar:
+  left:
+    - script:
+        path: /path/to/systower
+        args: [watch]
+        content:
+          map:
+            conditions:
+              caffeine == "on":
+                string: { text: "☕" }
+              caffeine == "off":
+                string: { text: "" }
+    - script:
+        path: /path/to/systower
+        args: [watch]
+        content:
+          string: { text: "🔋 {bat_percent}% {bat_estimate}" }
+```
+
+## Monitors
+
+| Monitor | Source | Update Method |
+|---------|--------|---------------|
+| Clock | System time | Polling (1s) |
+| Caffeine | D-Bus signal | Event-driven |
+| Battery | UPower D-Bus | Event-driven |
+| CPU | `/proc/stat` | Polling (5s) |
+| Memory | `/proc/meminfo` | Polling (5s) |
+| Storage | `syscall.Statfs` | Polling (60s) |
+
+## Dependencies
+
+- D-Bus (for battery monitoring and notifications)
+- UPower (for battery information)
+- X11: `xset` command (for caffeine on X11)
+- Wayland: swayidle (for caffeine on Wayland)
+
+## License
+
+MIT

@@ -6,7 +6,7 @@ import (
 )
 
 func TestReader_Read(t *testing.T) {
-	r := New(time.Second)
+	r := New()
 
 	// first read (cumulative since boot)
 	stats := r.Read()
