@@ -34,7 +34,7 @@ func (a *WaylandAdapter) Status() string {
 func (a *WaylandAdapter) startSwayidle() {
 	cmd := exec.Command("swayidle", "-w",
 		"timeout", "180", "swaylock -f",
-		// "timeout", "300", "~/.config/swaylock/scripts/suspend.sh",
+		"timeout", "600", "systemctl suspend",
 		"before-sleep", "swaylock -f",
 	)
 	cmd.Stdout = nil
