@@ -87,11 +87,14 @@ func (m *Monitor) Read() Stats {
 	}
 }
 
-func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
-	// Send initial state
-	callback(m.Read())
-
+func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) {
 	go func() {
+		context.AfterFunc(ctx, func() {
+			syscall.Write(m.cancelPipe[1], []byte{0})
+		})
+
+		callback(m.Read())
+
 		buf := make([]byte, 4096)
 		fds := []unix.PollFd{
 			{Fd: int32(m.fd), Events: unix.POLLIN},
@@ -99,7 +102,6 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 		}
 
 		for {
-			// Poll with no timeout (-1) - truly blocking, zero wakeups
 			n, err := unix.Poll(fds, -1)
 			if err != nil {
 				if err == syscall.EINTR {
@@ -111,12 +113,10 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 				continue
 			}
 
-			// Check cancellation pipe
 			if fds[1].Revents&unix.POLLIN != 0 {
 				return
 			}
 
-			// Check netlink socket
 			if fds[0].Revents&unix.POLLIN != 0 {
 				n, _, err := syscall.Recvfrom(m.fd, buf, 0)
 				if err != nil {
@@ -128,14 +128,6 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 			}
 		}
 	}()
-
-	// Watch for context cancellation
-	go func() {
-		<-ctx.Done()
-		syscall.Write(m.cancelPipe[1], []byte{0})
-	}()
-
-	return nil
 }
 
 func (m *Monitor) Close() {

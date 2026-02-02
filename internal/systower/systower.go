@@ -128,11 +128,9 @@ func (s *Systower) Watch(ctx context.Context) {
 
 	// Backlight monitor (optional)
 	if s.blMon != nil {
-		if err := s.blMon.Listen(ctx, func(stats backlight.Stats) {
+		s.blMon.Listen(ctx, func(stats backlight.Stats) {
 			events <- Event{Kind: BacklightUpdated, Payload: stats}
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: backlight monitor: %v\n", err)
-		}
+		})
 	}
 
 	// Battery monitor
