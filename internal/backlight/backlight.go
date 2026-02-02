@@ -3,13 +3,15 @@
 package backlight
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
-	"github.com/pilebones/go-udev/netlink"
+	"golang.org/x/sys/unix"
 )
 
 const sysBacklight = "/sys/class/backlight"
@@ -28,7 +30,8 @@ func (s Stats) Percent() int {
 
 type Monitor struct {
 	device        string
-	conn          *netlink.UEventConn
+	fd            int
+	cancelPipe    [2]int // pipe for cancellation signal
 	maxBrightness int
 }
 
@@ -46,14 +49,32 @@ func New(device string) (*Monitor, error) {
 		return nil, err
 	}
 
-	conn := &netlink.UEventConn{}
-	if err := conn.Connect(netlink.UdevEvent); err != nil {
+	// Create netlink socket for udev events
+	fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW, syscall.NETLINK_KOBJECT_UEVENT)
+	if err != nil {
+		return nil, err
+	}
+
+	addr := syscall.SockaddrNetlink{
+		Family: syscall.AF_NETLINK,
+		Groups: 2, // UDEV_MONITOR_UDEV (processed events)
+	}
+	if err := syscall.Bind(fd, &addr); err != nil {
+		syscall.Close(fd)
+		return nil, err
+	}
+
+	// Create pipe for cancellation
+	var cancelPipe [2]int
+	if err := syscall.Pipe(cancelPipe[:]); err != nil {
+		syscall.Close(fd)
 		return nil, err
 	}
 
 	return &Monitor{
 		device:        device,
-		conn:          conn,
+		fd:            fd,
+		cancelPipe:    cancelPipe,
 		maxBrightness: maxBrightness,
 	}, nil
 }
@@ -70,41 +91,71 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 	// Send initial state
 	callback(m.Read())
 
-	events := make(chan netlink.UEvent)
-	errs := make(chan error)
-	quit := m.conn.Monitor(events, errs, nil)
-
 	go func() {
-		defer close(quit)
+		buf := make([]byte, 4096)
+		fds := []unix.PollFd{
+			{Fd: int32(m.fd), Events: unix.POLLIN},
+			{Fd: int32(m.cancelPipe[0]), Events: unix.POLLIN},
+		}
+
 		for {
-			select {
-			case <-ctx.Done():
+			// Poll with no timeout (-1) - truly blocking, zero wakeups
+			n, err := unix.Poll(fds, -1)
+			if err != nil {
+				if err == syscall.EINTR {
+					continue
+				}
 				return
-			case ev := <-events:
-				if m.isBacklightEvent(ev) {
+			}
+			if n == 0 {
+				continue
+			}
+
+			// Check cancellation pipe
+			if fds[1].Revents&unix.POLLIN != 0 {
+				return
+			}
+
+			// Check netlink socket
+			if fds[0].Revents&unix.POLLIN != 0 {
+				n, _, err := syscall.Recvfrom(m.fd, buf, 0)
+				if err != nil {
+					continue
+				}
+				if m.isBacklightEvent(buf[:n]) {
 					callback(m.Read())
 				}
-			case <-errs:
-				// Ignore errors, continue monitoring
 			}
 		}
+	}()
+
+	// Watch for context cancellation
+	go func() {
+		<-ctx.Done()
+		syscall.Write(m.cancelPipe[1], []byte{0})
 	}()
 
 	return nil
 }
 
 func (m *Monitor) Close() {
-	if m.conn != nil {
-		m.conn.Close()
+	if m.fd != 0 {
+		syscall.Close(m.fd)
+	}
+	if m.cancelPipe[0] != 0 {
+		syscall.Close(m.cancelPipe[0])
+		syscall.Close(m.cancelPipe[1])
 	}
 }
 
-func (m *Monitor) isBacklightEvent(ev netlink.UEvent) bool {
-	if ev.Env["SUBSYSTEM"] != "backlight" {
-		return false
-	}
-	// Check if it's our device
-	return strings.HasSuffix(ev.KObj, "/"+m.device)
+// isBacklightEvent checks if the udev event is for our backlight device
+func (m *Monitor) isBacklightEvent(data []byte) bool {
+	// Udev event format: key=value pairs separated by null bytes
+	// We look for SUBSYSTEM=backlight and our device path
+	hasBacklight := bytes.Contains(data, []byte("SUBSYSTEM=backlight"))
+	hasDevice := bytes.Contains(data, []byte("/"+m.device+"\x00")) ||
+		bytes.Contains(data, []byte("/"+m.device+"@"))
+	return hasBacklight && hasDevice
 }
 
 func detectDevice() (string, error) {
