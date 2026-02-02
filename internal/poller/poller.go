@@ -2,25 +2,29 @@ package poller
 
 import (
 	"context"
+	"reflect"
 	"time"
+
+	"github.com/reekoheek/systower/internal/event"
 )
 
-type Task struct {
+type task struct {
 	interval time.Duration
 	elapsed  time.Duration
-	fn       func()
+	fn       func() event.Event
+	last     event.Event
 }
 
 type Poller struct {
-	tasks []*Task
+	tasks []*task
 }
 
 func New() *Poller {
 	return &Poller{}
 }
 
-func (p *Poller) Register(interval time.Duration, fn func()) {
-	p.tasks = append(p.tasks, &Task{
+func (p *Poller) Register(interval time.Duration, fn func() event.Event) {
+	p.tasks = append(p.tasks, &task{
 		interval: interval,
 		fn:       fn,
 	})
@@ -44,13 +48,18 @@ func gcd(a, b time.Duration) time.Duration {
 	return a
 }
 
-func (p *Poller) Poll(ctx context.Context) {
+func (p *Poller) Poll(ctx context.Context, onChange func([]event.Event)) {
 	base := p.base()
 
 	go func() {
-		// Run all tasks immediately
+		// Run all tasks immediately and collect initial values
+		events := make([]event.Event, 0, len(p.tasks))
 		for _, t := range p.tasks {
-			t.fn()
+			t.last = t.fn()
+			events = append(events, t.last)
+		}
+		if len(events) > 0 {
+			onChange(events)
 		}
 
 		ticker := time.NewTicker(base)
@@ -61,12 +70,20 @@ func (p *Poller) Poll(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				events = events[:0]
 				for _, t := range p.tasks {
 					t.elapsed += base
 					if t.elapsed >= t.interval {
-						t.fn()
+						e := t.fn()
+						if !reflect.DeepEqual(e.Payload, t.last.Payload) {
+							t.last = e
+							events = append(events, e)
+						}
 						t.elapsed = 0
 					}
+				}
+				if len(events) > 0 {
+					onChange(events)
 				}
 			}
 		}

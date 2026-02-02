@@ -1,40 +1,24 @@
 package systower
 
-type EventKind int
+import "github.com/reekoheek/systower/internal/event"
 
-const (
-	BacklightUpdated EventKind = iota
-	BatteryUpdated
-	CaffeineUpdated
-	ClockUpdated
-	CPUUpdated
-	MemUpdated
-	StorageUpdated
-	VolumeUpdated
-)
-
-type Event struct {
-	Kind    EventKind
-	Payload any
-}
-
-type EventHandler func(Event)
+type EventHandler func(event.Event)
 
 type eventBus struct {
-	handlers map[EventKind][]EventHandler
+	handlers map[event.Kind][]EventHandler
 }
 
 func newEventBus() *eventBus {
 	return &eventBus{
-		handlers: make(map[EventKind][]EventHandler),
+		handlers: make(map[event.Kind][]EventHandler),
 	}
 }
 
-func (b *eventBus) on(kind EventKind, h EventHandler) {
+func (b *eventBus) on(kind event.Kind, h EventHandler) {
 	b.handlers[kind] = append(b.handlers[kind], h)
 }
 
-func (b *eventBus) publish(e Event) {
+func (b *eventBus) publish(e event.Event) {
 	for _, h := range b.handlers[e.Kind] {
 		h(e)
 	}

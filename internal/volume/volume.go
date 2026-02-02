@@ -59,10 +59,6 @@ func parseWpctlVolume(output string) Stats {
 }
 
 func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
-	// Send initial state
-	lastStats := m.Read()
-	callback(lastStats)
-
 	// Start pactl subscribe to listen for events
 	m.cmd = exec.CommandContext(ctx, "pactl", "subscribe")
 	stdout, err := m.cmd.StdoutPipe()
@@ -75,6 +71,10 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 	}
 
 	go func() {
+		// Send initial state
+		lastStats := m.Read()
+		callback(lastStats)
+
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()

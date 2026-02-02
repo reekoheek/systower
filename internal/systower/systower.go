@@ -13,6 +13,7 @@ import (
 	"github.com/reekoheek/systower/internal/caffeine"
 	"github.com/reekoheek/systower/internal/clock"
 	"github.com/reekoheek/systower/internal/cpu"
+	"github.com/reekoheek/systower/internal/event"
 	"github.com/reekoheek/systower/internal/mem"
 	"github.com/reekoheek/systower/internal/notification"
 	"github.com/reekoheek/systower/internal/poller"
@@ -98,12 +99,12 @@ func New(intervals Intervals) (*Systower, error) {
 		intervals:     intervals,
 	}
 
-	s.On(BatteryUpdated, s.onBatteryUpdated)
+	s.On(event.BatteryUpdated, s.onBatteryUpdated)
 
 	return s, nil
 }
 
-func (s *Systower) On(kind EventKind, h EventHandler) {
+func (s *Systower) On(kind event.Kind, h EventHandler) {
 	s.events.on(kind, h)
 }
 
@@ -123,18 +124,18 @@ func (s *Systower) Close() {
 }
 
 func (s *Systower) Watch(ctx context.Context) {
-	events := make(chan Event, 16)
+	events := make(chan []event.Event, 16)
 
 	// Backlight monitor (optional)
 	if s.blMon != nil {
 		s.blMon.Listen(ctx, func(stats backlight.Stats) {
-			events <- Event{Kind: BacklightUpdated, Payload: stats}
+			events <- []event.Event{{Kind: event.BacklightUpdated, Payload: stats}}
 		})
 	}
 
 	// Battery monitor
 	if err := s.batMon.Listen(ctx, func(info battery.Stats) {
-		events <- Event{Kind: BatteryUpdated, Payload: info}
+		events <- []event.Event{{Kind: event.BatteryUpdated, Payload: info}}
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -142,7 +143,7 @@ func (s *Systower) Watch(ctx context.Context) {
 
 	// Caffeine monitor
 	if err := s.caff.Listen(ctx, func(status string) {
-		events <- Event{Kind: CaffeineUpdated, Payload: status}
+		events <- []event.Event{{Kind: event.CaffeineUpdated, Payload: status}}
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -150,7 +151,7 @@ func (s *Systower) Watch(ctx context.Context) {
 
 	// Volume monitor
 	if err := s.volMon.Listen(ctx, func(stats volume.Stats) {
-		events <- Event{Kind: VolumeUpdated, Payload: stats}
+		events <- []event.Event{{Kind: event.VolumeUpdated, Payload: stats}}
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -158,19 +159,21 @@ func (s *Systower) Watch(ctx context.Context) {
 
 	// Polling readers - send events via channel
 	p := poller.New()
-	p.Register(s.intervals.Clock, func() {
-		events <- Event{Kind: ClockUpdated, Payload: s.clockReader.Read()}
+	p.Register(s.intervals.Clock, func() event.Event {
+		return event.Event{Kind: event.ClockUpdated, Payload: s.clockReader.Read()}
 	})
-	p.Register(s.intervals.CPU, func() {
-		events <- Event{Kind: CPUUpdated, Payload: s.cpuReader.Read()}
+	p.Register(s.intervals.CPU, func() event.Event {
+		return event.Event{Kind: event.CPUUpdated, Payload: s.cpuReader.Read()}
 	})
-	p.Register(s.intervals.Mem, func() {
-		events <- Event{Kind: MemUpdated, Payload: s.memReader.Read()}
+	p.Register(s.intervals.Mem, func() event.Event {
+		return event.Event{Kind: event.MemUpdated, Payload: s.memReader.Read()}
 	})
-	p.Register(s.intervals.Storage, func() {
-		events <- Event{Kind: StorageUpdated, Payload: s.storageReader.Read()}
+	p.Register(s.intervals.Storage, func() event.Event {
+		return event.Event{Kind: event.StorageUpdated, Payload: s.storageReader.Read()}
 	})
-	p.Poll(ctx)
+	p.Poll(ctx, func(batch []event.Event) {
+		events <- batch
+	})
 
 	// Main loop - single goroutine owns stats
 	var lastStats Stats
@@ -179,8 +182,10 @@ func (s *Systower) Watch(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case e := <-events:
-			s.dispatch(e)
+		case batch := <-events:
+			for _, e := range batch {
+				s.dispatch(e)
+			}
 			if s.stats != lastStats {
 				lastStats = s.stats
 				os.Stdout.WriteString(s.output())
@@ -189,30 +194,30 @@ func (s *Systower) Watch(ctx context.Context) {
 	}
 }
 
-func (s *Systower) dispatch(e Event) {
+func (s *Systower) dispatch(e event.Event) {
 	switch e.Kind {
-	case BacklightUpdated:
+	case event.BacklightUpdated:
 		s.stats.Backlight = e.Payload.(backlight.Stats)
-	case BatteryUpdated:
+	case event.BatteryUpdated:
 		s.stats.Battery = e.Payload.(battery.Stats)
-	case CaffeineUpdated:
+	case event.CaffeineUpdated:
 		s.stats.Caffeine = e.Payload.(string)
-	case ClockUpdated:
+	case event.ClockUpdated:
 		s.stats.Clock = e.Payload.(clock.Stats)
-	case CPUUpdated:
+	case event.CPUUpdated:
 		s.stats.CPU = e.Payload.(cpu.Stats)
-	case MemUpdated:
+	case event.MemUpdated:
 		s.stats.Mem = e.Payload.(mem.Stats)
-	case StorageUpdated:
+	case event.StorageUpdated:
 		s.stats.Storage = e.Payload.(storage.Stats)
-	case VolumeUpdated:
+	case event.VolumeUpdated:
 		s.stats.Volume = e.Payload.(volume.Stats)
 	}
 
 	s.events.publish(e)
 }
 
-func (s *Systower) onBatteryUpdated(e Event) {
+func (s *Systower) onBatteryUpdated(e event.Event) {
 	info := e.Payload.(battery.Stats)
 	if info.Status != "charging" {
 		if s.caff.Read() == "on" && info.Percent < 15 {
