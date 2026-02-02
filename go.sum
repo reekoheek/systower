@@ -1,7 +1,5 @@
 github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
 github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
-github.com/lawl/pulseaudio v0.0.0-20220626105240-976bed5e247c h1:j96x2SroUFS59ENzG7vI5n/hJ79qDYv8/MJ7pumgJCk=
-github.com/lawl/pulseaudio v0.0.0-20220626105240-976bed5e247c/go.mod h1:9h36x4KH7r2V8DOCKoPMt87IXZ++X90y8D5nnuwq290=
 github.com/pilebones/go-udev v0.9.1 h1:uN72M1C1fgzhsVmBGEM8w9RD1JY4iVsPZpr+Z6rb3O8=
 github.com/pilebones/go-udev v0.9.1/go.mod h1:Bgcl07crebF3JSeS4+nuaRvhWFdCeFoBhXXeAp93XNo=
 golang.org/x/sys v0.27.0 h1:wBqf8DvsY9Y/2P8gAfPDEYNuS30J4lPHJxXSb/nJZ+s=

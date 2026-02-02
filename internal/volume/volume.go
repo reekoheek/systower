@@ -1,9 +1,11 @@
 package volume
 
 import (
+	"bufio"
 	"context"
-
-	"github.com/lawl/pulseaudio"
+	"os/exec"
+	"strconv"
+	"strings"
 )
 
 type Stats struct {
@@ -12,34 +14,43 @@ type Stats struct {
 }
 
 type Monitor struct {
-	client *pulseaudio.Client
+	cmd *exec.Cmd
 }
 
 func New() (*Monitor, error) {
-	client, err := pulseaudio.NewClient()
-	if err != nil {
-		return nil, err
-	}
-
-	return &Monitor{client: client}, nil
+	return &Monitor{}, nil
 }
 
 func (m *Monitor) Close() {
-	if m.client != nil {
-		m.client.Close()
+	if m.cmd != nil && m.cmd.Process != nil {
+		m.cmd.Process.Kill()
 	}
 }
 
 func (m *Monitor) Read() Stats {
-	vol, err := m.client.Volume()
+	// Use wpctl to get volume (works with PipeWire and PulseAudio)
+	out, err := exec.Command("wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@").Output()
 	if err != nil {
 		return Stats{}
 	}
 
-	muted, err := m.client.Mute()
+	return parseWpctlVolume(string(out))
+}
+
+func parseWpctlVolume(output string) Stats {
+	// Format: "Volume: 0.82" or "Volume: 0.82 [MUTED]"
+	output = strings.TrimSpace(output)
+	parts := strings.Fields(output)
+	if len(parts) < 2 {
+		return Stats{}
+	}
+
+	vol, err := strconv.ParseFloat(parts[1], 64)
 	if err != nil {
 		return Stats{}
 	}
+
+	muted := strings.Contains(output, "[MUTED]")
 
 	return Stats{
 		Percent: int(vol * 100),
@@ -48,21 +59,28 @@ func (m *Monitor) Read() Stats {
 }
 
 func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
-	updates, err := m.client.Updates()
+	// Send initial state
+	lastStats := m.Read()
+	callback(lastStats)
+
+	// Start pactl subscribe to listen for events
+	m.cmd = exec.CommandContext(ctx, "pactl", "subscribe")
+	stdout, err := m.cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
 
-	go func() {
-		// Send initial state
-		lastStats := m.Read()
-		callback(lastStats)
+	if err := m.cmd.Start(); err != nil {
+		return err
+	}
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-updates:
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// Only react to sink events (volume/mute changes)
+			// Format: "Event 'change' on sink #123"
+			if strings.Contains(line, " on sink ") {
 				stats := m.Read()
 				if stats != lastStats {
 					lastStats = stats
