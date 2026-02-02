@@ -25,7 +25,7 @@ func New(conn *dbus.Conn) *Sys {
 	return &Sys{conn: conn}
 }
 
-func (s *Sys) Poweroff() {
-	s.conn.Object("org.freedesktop.login1", "/org/freedesktop/login1").
-		Call("org.freedesktop.login1.Manager.PowerOff", 0, false)
+func (s *Sys) Poweroff() error {
+	return s.conn.Object("org.freedesktop.login1", "/org/freedesktop/login1").
+		Call("org.freedesktop.login1.Manager.PowerOff", 0, false).Err
 }

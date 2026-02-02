@@ -11,8 +11,8 @@ func New(conn *dbus.Conn, title string) *Notification {
 	return &Notification{conn: conn, title: title}
 }
 
-func (n *Notification) Send(body string) {
-	n.conn.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications").
+func (n *Notification) Send(body string) error {
+	return n.conn.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications").
 		Call("org.freedesktop.Notifications.Notify", 0,
 			"systower",
 			uint32(0),
@@ -22,5 +22,5 @@ func (n *Notification) Send(body string) {
 			[]string{},
 			map[string]dbus.Variant{},
 			int32(-1),
-		)
+		).Err
 }

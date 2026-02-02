@@ -123,7 +123,7 @@ func (s *Systower) Close() {
 	}
 }
 
-func (s *Systower) Watch(ctx context.Context) {
+func (s *Systower) Watch(ctx context.Context) error {
 	events := make(chan []event.Event, 16)
 
 	// Backlight monitor (optional)
@@ -137,24 +137,21 @@ func (s *Systower) Watch(ctx context.Context) {
 	if err := s.batMon.Listen(ctx, func(info battery.Stats) {
 		events <- []event.Event{{Kind: event.BatteryUpdated, Payload: info}}
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("battery monitor: %w", err)
 	}
 
 	// Caffeine monitor
 	if err := s.caff.Listen(ctx, func(status string) {
 		events <- []event.Event{{Kind: event.CaffeineUpdated, Payload: status}}
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("caffeine monitor: %w", err)
 	}
 
 	// Volume monitor
 	if err := s.volMon.Listen(ctx, func(stats volume.Stats) {
 		events <- []event.Event{{Kind: event.VolumeUpdated, Payload: stats}}
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("volume monitor: %w", err)
 	}
 
 	// Polling readers - send events via channel
@@ -181,7 +178,7 @@ func (s *Systower) Watch(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case batch := <-events:
 			for _, e := range batch {
 				s.dispatch(e)

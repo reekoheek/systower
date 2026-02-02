@@ -3,12 +3,12 @@ package battery
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/godbus/dbus/v5"
 )
 
 const (
-	upowerPath         = "/org/freedesktop/UPower/devices/battery_BAT0"
 	propsIface         = "org.freedesktop.DBus.Properties"
 	propsChangedSignal = "PropertiesChanged"
 )
@@ -21,11 +21,30 @@ type Stats struct {
 
 type Monitor struct {
 	conn *dbus.Conn
+	path dbus.ObjectPath
 	info Stats
 }
 
 func New(conn *dbus.Conn) *Monitor {
 	return &Monitor{conn: conn}
+}
+
+func (m *Monitor) detectBattery() error {
+	obj := m.conn.Object("org.freedesktop.UPower", "/org/freedesktop/UPower")
+	var devices []dbus.ObjectPath
+	if err := obj.Call("org.freedesktop.UPower.EnumerateDevices", 0).Store(&devices); err != nil {
+		return fmt.Errorf("enumerate devices: %w", err)
+	}
+
+	for _, dev := range devices {
+		path := string(dev)
+		if strings.Contains(path, "/battery_") {
+			m.path = dev
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no battery found")
 }
 
 func (m *Monitor) Read() Stats {
@@ -96,7 +115,7 @@ func (m *Monitor) parseSignal(body []interface{}) bool {
 }
 
 func (m *Monitor) fetchInitial() error {
-	obj := m.conn.Object("org.freedesktop.UPower", dbus.ObjectPath(upowerPath))
+	obj := m.conn.Object("org.freedesktop.UPower", m.path)
 	var props map[string]dbus.Variant
 	if err := obj.Call(propsIface+".GetAll", 0, "org.freedesktop.UPower.Device").Store(&props); err != nil {
 		return err
@@ -133,9 +152,13 @@ func (m *Monitor) fetchInitial() error {
 }
 
 func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
+	if err := m.detectBattery(); err != nil {
+		return err
+	}
+
 	matchRule := fmt.Sprintf(
 		"type='signal',interface='%s',member='%s',path='%s'",
-		propsIface, propsChangedSignal, upowerPath,
+		propsIface, propsChangedSignal, m.path,
 	)
 
 	if err := m.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
@@ -157,7 +180,7 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 				m.conn.RemoveSignal(signals)
 				return
 			case sig := <-signals:
-				if sig.Path == dbus.ObjectPath(upowerPath) && sig.Name == propsIface+"."+propsChangedSignal {
+				if sig.Path == m.path && sig.Name == propsIface+"."+propsChangedSignal {
 					if m.parseSignal(sig.Body) {
 						callback(m.info)
 					}

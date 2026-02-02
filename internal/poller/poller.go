@@ -2,7 +2,6 @@ package poller
 
 import (
 	"context"
-	"reflect"
 	"time"
 
 	"github.com/reekoheek/systower/internal/event"
@@ -75,7 +74,7 @@ func (p *Poller) Poll(ctx context.Context, onChange func([]event.Event)) {
 					t.elapsed += base
 					if t.elapsed >= t.interval {
 						e := t.fn()
-						if !reflect.DeepEqual(e.Payload, t.last.Payload) {
+						if e.Payload != t.last.Payload {
 							t.last = e
 							events = append(events, e)
 						}
