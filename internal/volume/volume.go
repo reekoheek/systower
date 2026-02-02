@@ -55,14 +55,19 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 
 	go func() {
 		// Send initial state
-		callback(m.Read())
+		lastStats := m.Read()
+		callback(lastStats)
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-updates:
-				callback(m.Read())
+				stats := m.Read()
+				if stats != lastStats {
+					lastStats = stats
+					callback(stats)
+				}
 			}
 		}
 	}()
