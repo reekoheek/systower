@@ -33,11 +33,10 @@ type Stats struct {
 }
 
 type Intervals struct {
-	Clock    time.Duration
-	CPU      time.Duration
-	Mem      time.Duration
-	Storage  time.Duration
-	Throttle time.Duration
+	Clock   time.Duration
+	CPU     time.Duration
+	Mem     time.Duration
+	Storage time.Duration
 }
 
 type Systower struct {
@@ -174,33 +173,18 @@ func (s *Systower) Watch(ctx context.Context) {
 	p.Poll(ctx)
 
 	// Main loop - single goroutine owns stats
-	var (
-		lastStats Stats
-		timer     *time.Timer
-		timerC    <-chan time.Time
-	)
+	var lastStats Stats
 
 	for {
 		select {
 		case <-ctx.Done():
-			if timer != nil {
-				timer.Stop()
-			}
 			return
 		case e := <-events:
 			s.dispatch(e)
-			// Throttle: start timer only if not already pending
-			if timer == nil {
-				timer = time.NewTimer(s.intervals.Throttle)
-				timerC = timer.C
-			}
-		case <-timerC:
 			if s.stats != lastStats {
 				lastStats = s.stats
 				os.Stdout.WriteString(s.output())
 			}
-			timer = nil
-			timerC = nil
 		}
 	}
 }

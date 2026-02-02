@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 const usage = "usage: systower <watch|caffeine <on|off|toggle|status>>"
 
 func main() {
+	runtime.GOMAXPROCS(1)
+
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(1)
@@ -39,15 +42,13 @@ func runWatch() {
 	cpuInterval := fs.Duration("cpu", 5*time.Second, "cpu polling interval")
 	memInterval := fs.Duration("mem", 5*time.Second, "memory polling interval")
 	storageInterval := fs.Duration("storage", 300*time.Second, "storage polling interval")
-	throttle := fs.Duration("throttle", 50*time.Millisecond, "throttle interval")
 	fs.Parse(os.Args[2:])
 
 	s, err := systower.New(systower.Intervals{
-		Clock:    *clockInterval,
-		CPU:      *cpuInterval,
-		Mem:      *memInterval,
-		Storage:  *storageInterval,
-		Throttle: *throttle,
+		Clock:   *clockInterval,
+		CPU:     *cpuInterval,
+		Mem:     *memInterval,
+		Storage: *storageInterval,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

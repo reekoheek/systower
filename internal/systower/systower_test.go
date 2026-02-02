@@ -7,11 +7,10 @@ import (
 
 func TestNew(t *testing.T) {
 	s, err := New(Intervals{
-		Clock:    time.Second,
-		CPU:      time.Second,
-		Mem:      time.Second,
-		Storage:  time.Second,
-		Throttle: 100 * time.Millisecond,
+		Clock:   time.Second,
+		CPU:     time.Second,
+		Mem:     time.Second,
+		Storage: time.Second,
 	})
 
 	if err != nil {
