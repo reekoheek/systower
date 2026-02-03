@@ -15,7 +15,7 @@ func (s Stats) Date() string {
 }
 
 func (s Stats) Time() string {
-	return time.Unix(s.Unix, 0).Format("15:04")
+	return time.Unix(s.Unix, 0).Format("15:04:05")
 }
 
 type Reader struct{}

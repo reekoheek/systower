@@ -38,9 +38,9 @@ func main() {
 
 func runWatch() {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
-	clockInterval := fs.Duration("clock", 30*time.Second, "clock polling interval")
-	cpuInterval := fs.Duration("cpu", 10*time.Second, "cpu polling interval")
-	memInterval := fs.Duration("mem", 10*time.Second, "memory polling interval")
+	clockInterval := fs.Duration("clock", 3*time.Second, "clock polling interval")
+	cpuInterval := fs.Duration("cpu", 3*time.Second, "cpu polling interval")
+	memInterval := fs.Duration("mem", 3*time.Second, "memory polling interval")
 	storageInterval := fs.Duration("storage", 300*time.Second, "storage polling interval")
 	fs.Parse(os.Args[2:])
 
