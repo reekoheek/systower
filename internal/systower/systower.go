@@ -15,6 +15,7 @@ import (
 	"github.com/reekoheek/systower/internal/clock"
 	"github.com/reekoheek/systower/internal/cpu"
 	"github.com/reekoheek/systower/internal/mem"
+	"github.com/reekoheek/systower/internal/network"
 	"github.com/reekoheek/systower/internal/storage"
 	"github.com/reekoheek/systower/internal/volume"
 )
@@ -28,6 +29,7 @@ type Stats struct {
 	Mem       mem.Stats
 	Storage   storage.Stats
 	Volume    volume.Stats
+	Network   network.Stats
 }
 
 type Intervals struct {
@@ -63,6 +65,7 @@ type Systower struct {
 	blMon     *backlight.Monitor
 	batMon    *battery.Monitor
 	volMon    *volume.Monitor
+	netMon    *network.Monitor
 	stats     Stats
 	intervals Intervals
 
@@ -90,6 +93,7 @@ func New(intervals Intervals) (*Systower, error) {
 		blMon:         blMon,
 		batMon:        battery.New(sysConn),
 		volMon:        volume.New(),
+		netMon:        network.New(sysConn),
 		intervals:     intervals,
 		clockReader:   clock.New(),
 		cpuReader:     cpu.New(),
@@ -124,6 +128,11 @@ func (s *Systower) Watch(ctx context.Context) error {
 		return fmt.Errorf("volume monitor: %w", err)
 	}
 
+	netCh, err := s.netMon.Listen(ctx)
+	if err != nil {
+		return fmt.Errorf("network monitor: %w", err)
+	}
+
 	// Calculate optimal ticker interval using GCD of all intervals
 	baseInterval := s.intervals.baseInterval()
 	ticker := time.NewTicker(baseInterval)
@@ -145,6 +154,7 @@ func (s *Systower) Watch(ctx context.Context) error {
 	s.stats.Storage = s.storageReader.Read()
 	s.stats.Caffeine = s.caff.Read()
 	s.stats.Battery = s.batMon.Read(nil)
+	s.stats.Network = s.netMon.Read(nil)
 
 	var lastStats Stats
 
@@ -165,6 +175,9 @@ func (s *Systower) Watch(ctx context.Context) error {
 
 		case stats := <-volCh:
 			s.stats.Volume = stats
+
+		case sig := <-netCh:
+			s.stats.Network = s.netMon.Read(sig)
 
 		case <-ticker.C:
 			tickCount++
@@ -231,6 +244,11 @@ func (s *Systower) output() string {
 	fmt.Fprintf(&b, "storage_percent|int|%d\n", s.stats.Storage.Percent())
 	fmt.Fprintf(&b, "vol_percent|int|%d\n", s.stats.Volume.Percent)
 	fmt.Fprintf(&b, "vol_muted|bool|%t\n", s.stats.Volume.Muted)
+	fmt.Fprintf(&b, "wifi_state|bool|%t\n", s.stats.Network.WifiState)
+	fmt.Fprintf(&b, "wifi_ipv4|string|%s\n", s.stats.Network.WifiIPv4)
+	fmt.Fprintf(&b, "wifi_ssid|string|%s\n", s.stats.Network.WifiSSID)
+	fmt.Fprintf(&b, "eth_state|bool|%t\n", s.stats.Network.EthState)
+	fmt.Fprintf(&b, "eth_ipv4|string|%s\n", s.stats.Network.EthIPv4)
 	b.WriteByte('\n')
 	return b.String()
 }
