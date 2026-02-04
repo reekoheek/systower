@@ -30,8 +30,6 @@ func (s Stats) Percent() int {
 
 type Monitor struct {
 	device        string
-	fd            int
-	cancelPipe    [2]int // pipe for cancellation signal
 	maxBrightness int
 }
 
@@ -49,32 +47,8 @@ func New(device string) (*Monitor, error) {
 		return nil, err
 	}
 
-	// Create netlink socket for udev events
-	fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW, syscall.NETLINK_KOBJECT_UEVENT)
-	if err != nil {
-		return nil, err
-	}
-
-	addr := syscall.SockaddrNetlink{
-		Family: syscall.AF_NETLINK,
-		Groups: 2, // UDEV_MONITOR_UDEV (processed events)
-	}
-	if err := syscall.Bind(fd, &addr); err != nil {
-		syscall.Close(fd)
-		return nil, err
-	}
-
-	// Create pipe for cancellation
-	var cancelPipe [2]int
-	if err := syscall.Pipe(cancelPipe[:]); err != nil {
-		syscall.Close(fd)
-		return nil, err
-	}
-
 	return &Monitor{
 		device:        device,
-		fd:            fd,
-		cancelPipe:    cancelPipe,
 		maxBrightness: maxBrightness,
 	}, nil
 }
@@ -93,16 +67,38 @@ func (m *Monitor) Listen(ctx context.Context) <-chan Stats {
 	go func() {
 		defer close(ch)
 
+		// Create netlink socket for udev events
+		fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW, syscall.NETLINK_KOBJECT_UEVENT)
+		if err != nil {
+			return
+		}
+		defer syscall.Close(fd)
+
+		addr := syscall.SockaddrNetlink{
+			Family: syscall.AF_NETLINK,
+			Groups: 2, // UDEV_MONITOR_UDEV (processed events)
+		}
+		if err := syscall.Bind(fd, &addr); err != nil {
+			return
+		}
+
+		// Create eventfd for cancellation
+		cancelFd, err := unix.Eventfd(0, unix.EFD_NONBLOCK)
+		if err != nil {
+			return
+		}
+		defer syscall.Close(cancelFd)
+
 		context.AfterFunc(ctx, func() {
-			syscall.Write(m.cancelPipe[1], []byte{0})
+			unix.Write(cancelFd, []byte{1, 0, 0, 0, 0, 0, 0, 0})
 		})
 
 		ch <- m.Read()
 
 		buf := make([]byte, 4096)
 		fds := []unix.PollFd{
-			{Fd: int32(m.fd), Events: unix.POLLIN},
-			{Fd: int32(m.cancelPipe[0]), Events: unix.POLLIN},
+			{Fd: int32(fd), Events: unix.POLLIN},
+			{Fd: int32(cancelFd), Events: unix.POLLIN},
 		}
 
 		for {
@@ -122,7 +118,7 @@ func (m *Monitor) Listen(ctx context.Context) <-chan Stats {
 			}
 
 			if fds[0].Revents&unix.POLLIN != 0 {
-				n, _, err := syscall.Recvfrom(m.fd, buf, 0)
+				n, _, err := syscall.Recvfrom(fd, buf, 0)
 				if err != nil {
 					continue
 				}
@@ -136,15 +132,6 @@ func (m *Monitor) Listen(ctx context.Context) <-chan Stats {
 	return ch
 }
 
-func (m *Monitor) Close() {
-	if m.fd != 0 {
-		syscall.Close(m.fd)
-	}
-	if m.cancelPipe[0] != 0 {
-		syscall.Close(m.cancelPipe[0])
-		syscall.Close(m.cancelPipe[1])
-	}
-}
 
 // isBacklightEvent checks if the udev event is for our backlight device
 func (m *Monitor) isBacklightEvent(data []byte) bool {

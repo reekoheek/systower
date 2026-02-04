@@ -87,14 +87,14 @@ func New() (*Systower, error) {
 	return s, nil
 }
 
-func (s *Systower) Close() {
-	s.blMon.Close()
-	s.volMon.Close()
-	s.conn.Close()
-	s.sysConn.Close()
-}
-
 func (s *Systower) Watch(ctx context.Context) error {
+	// Cleanup when context is cancelled
+	context.AfterFunc(ctx, func() {
+		s.volMon.Close()
+		s.conn.Close()
+		s.sysConn.Close()
+	})
+
 	// Start all monitors - they return channels
 	blCh := s.blMon.Listen(ctx)
 

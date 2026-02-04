@@ -11,6 +11,4 @@ func TestNew(t *testing.T) {
 	if s == nil {
 		t.Error("New() should not return nil")
 	}
-
-	s.Close()
 }
