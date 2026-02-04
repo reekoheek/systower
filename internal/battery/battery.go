@@ -22,7 +22,7 @@ type Stats struct {
 type Monitor struct {
 	conn *dbus.Conn
 	path dbus.ObjectPath
-	info Stats
+	last Stats
 }
 
 func New(conn *dbus.Conn) *Monitor {
@@ -47,8 +47,16 @@ func (m *Monitor) detectBattery() error {
 	return fmt.Errorf("no battery found")
 }
 
-func (m *Monitor) Read() Stats {
-	return m.info
+func (m *Monitor) Read(sig *dbus.Signal) Stats {
+	if sig == nil {
+		if stats, ok := m.fetchStats(); ok {
+			m.last = stats
+		}
+	} else if stats, ok := m.parseSignal(sig); ok {
+		m.last = stats
+	}
+
+	return m.last
 }
 
 var stateNames = map[uint32]string{
@@ -60,22 +68,27 @@ var stateNames = map[uint32]string{
 	6: "discharging", // pending discharge
 }
 
-func (m *Monitor) parseSignal(body []interface{}) bool {
-	if len(body) < 2 {
-		return false
+func (m *Monitor) parseSignal(sig *dbus.Signal) (Stats, bool) {
+	if sig.Path != m.path || sig.Name != propsIface+"."+propsChangedSignal {
+		return Stats{}, false
 	}
 
-	props, ok := body[1].(map[string]dbus.Variant)
+	if len(sig.Body) < 2 {
+		return Stats{}, false
+	}
+
+	props, ok := sig.Body[1].(map[string]dbus.Variant)
 	if !ok {
-		return false
+		return Stats{}, false
 	}
 
+	stats := m.last
 	changed := false
 
 	if v, ok := props["State"]; ok {
 		if state, ok := v.Value().(uint32); ok {
 			if name, ok := stateNames[state]; ok {
-				m.info.Status = name
+				stats.Status = name
 				changed = true
 			}
 		}
@@ -83,7 +96,7 @@ func (m *Monitor) parseSignal(body []interface{}) bool {
 
 	if v, ok := props["Percentage"]; ok {
 		if pct, ok := v.Value().(float64); ok {
-			m.info.Percent = int(pct)
+			stats.Percent = int(pct)
 			changed = true
 		}
 	}
@@ -104,34 +117,36 @@ func (m *Monitor) parseSignal(body []interface{}) bool {
 
 	if estimateFound {
 		if seconds > 0 {
-			m.info.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+			stats.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
 		} else {
-			m.info.Estimate = ""
+			stats.Estimate = ""
 		}
 		changed = true
 	}
 
-	return changed
+	return stats, changed
 }
 
-func (m *Monitor) fetchInitial() error {
+func (m *Monitor) fetchStats() (Stats, bool) {
 	obj := m.conn.Object("org.freedesktop.UPower", m.path)
 	var props map[string]dbus.Variant
 	if err := obj.Call(propsIface+".GetAll", 0, "org.freedesktop.UPower.Device").Store(&props); err != nil {
-		return err
+		return Stats{}, false
 	}
+
+	var stats Stats
 
 	if v, ok := props["State"]; ok {
 		if state, ok := v.Value().(uint32); ok {
 			if name, ok := stateNames[state]; ok {
-				m.info.Status = name
+				stats.Status = name
 			}
 		}
 	}
 
 	if v, ok := props["Percentage"]; ok {
 		if pct, ok := v.Value().(float64); ok {
-			m.info.Percent = int(pct)
+			stats.Percent = int(pct)
 		}
 	}
 
@@ -145,15 +160,15 @@ func (m *Monitor) fetchInitial() error {
 		}
 	}
 	if seconds > 0 {
-		m.info.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+		stats.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
 	}
 
-	return nil
+	return stats, true
 }
 
-func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
+func (m *Monitor) Listen(ctx context.Context) (<-chan *dbus.Signal, error) {
 	if err := m.detectBattery(); err != nil {
-		return err
+		return nil, err
 	}
 
 	matchRule := fmt.Sprintf(
@@ -162,32 +177,15 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 	)
 
 	if err := m.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
-		return fmt.Errorf("failed to add match rule: %w", err)
+		return nil, fmt.Errorf("failed to add match rule: %w", err)
 	}
 
-	go func() {
-		// Fetch initial state before listening for changes
-		if err := m.fetchInitial(); err == nil {
-			callback(m.info)
-		}
+	ch := make(chan *dbus.Signal, 1)
+	m.conn.Signal(ch)
 
-		signals := make(chan *dbus.Signal, 10)
-		m.conn.Signal(signals)
+	context.AfterFunc(ctx, func() {
+		m.conn.RemoveSignal(ch)
+	})
 
-		for {
-			select {
-			case <-ctx.Done():
-				m.conn.RemoveSignal(signals)
-				return
-			case sig := <-signals:
-				if sig.Path == m.path && sig.Name == propsIface+"."+propsChangedSignal {
-					if m.parseSignal(sig.Body) {
-						callback(m.info)
-					}
-				}
-			}
-		}
-	}()
-
-	return nil
+	return ch, nil
 }

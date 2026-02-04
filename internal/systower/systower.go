@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -13,19 +14,15 @@ import (
 	"github.com/reekoheek/systower/internal/caffeine"
 	"github.com/reekoheek/systower/internal/clock"
 	"github.com/reekoheek/systower/internal/cpu"
-	"github.com/reekoheek/systower/internal/event"
 	"github.com/reekoheek/systower/internal/mem"
-	"github.com/reekoheek/systower/internal/notification"
-	"github.com/reekoheek/systower/internal/poller"
 	"github.com/reekoheek/systower/internal/storage"
-	"github.com/reekoheek/systower/internal/sys"
 	"github.com/reekoheek/systower/internal/volume"
 )
 
 type Stats struct {
 	Backlight backlight.Stats
 	Clock     clock.Stats
-	Caffeine  string
+	Caffeine  caffeine.Stats
 	Battery   battery.Stats
 	CPU       cpu.Stats
 	Mem       mem.Stats
@@ -34,201 +31,184 @@ type Stats struct {
 }
 
 type Intervals struct {
-	Clock   time.Duration
-	CPU     time.Duration
-	Mem     time.Duration
-	Storage time.Duration
+	Clock   uint64
+	CPU     uint64
+	Mem     uint64
+	Storage uint64
+}
+
+// gcd calculates greatest common divisor of two numbers
+func gcd(a, b uint64) uint64 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
+// baseInterval calculates the optimal ticker interval using GCD
+func (i Intervals) baseInterval() time.Duration {
+	result := i.Clock
+	result = gcd(result, i.CPU)
+	result = gcd(result, i.Mem)
+	result = gcd(result, i.Storage)
+	if result == 0 {
+		result = 1
+	}
+	return time.Duration(result) * time.Second
 }
 
 type Systower struct {
-	conn    *dbus.Conn
-	sysConn *dbus.Conn
-	caff    *caffeine.Caffeine
-	notif   *notification.Notification
-	blMon   *backlight.Monitor
-	batMon  *battery.Monitor
-	volMon  *volume.Monitor
-	sysMgr  *sys.Sys
-	stats   Stats
-	events  *eventBus
+	sysConn   *dbus.Conn
+	caff      *caffeine.Caffeine
+	blMon     *backlight.Monitor
+	batMon    *battery.Monitor
+	volMon    *volume.Monitor
+	stats     Stats
+	intervals Intervals
 
 	clockReader   *clock.Reader
 	cpuReader     *cpu.Reader
 	memReader     *mem.Reader
 	storageReader *storage.Reader
-
-	intervals Intervals
 }
 
 func New(intervals Intervals) (*Systower, error) {
-	conn, err := dbus.SessionBus()
-	if err != nil {
-		return nil, fmt.Errorf("session bus: %w", err)
-	}
-
 	sysConn, err := dbus.SystemBus()
 	if err != nil {
-		conn.Close()
 		return nil, fmt.Errorf("system bus: %w", err)
 	}
 
-	volMon, err := volume.New()
+	blMon, err := backlight.New("")
 	if err != nil {
-		conn.Close()
 		sysConn.Close()
-		return nil, fmt.Errorf("volume monitor: %w", err)
+		return nil, fmt.Errorf("backlight monitor: %w", err)
 	}
 
-	// Backlight monitor is optional (may not exist on desktops)
-	blMon, _ := backlight.New("")
-
 	s := &Systower{
-		conn:          conn,
 		sysConn:       sysConn,
-		caff:          caffeine.New(conn, caffeine.DetectAdapter()),
-		notif:         notification.New(conn, "Systower"),
+		caff:          caffeine.New(caffeine.DetectAdapter()),
 		blMon:         blMon,
 		batMon:        battery.New(sysConn),
-		volMon:        volMon,
-		sysMgr:        sys.New(sysConn),
-		events:        newEventBus(),
+		volMon:        volume.New(),
+		intervals:     intervals,
 		clockReader:   clock.New(),
 		cpuReader:     cpu.New(),
 		memReader:     mem.New(),
 		storageReader: storage.New("/"),
-		intervals:     intervals,
 	}
-
-	s.On(event.BatteryUpdated, s.onBatteryUpdated)
 
 	return s, nil
 }
 
-func (s *Systower) On(kind event.Kind, h EventHandler) {
-	s.events.on(kind, h)
-}
-
-func (s *Systower) Close() {
-	if s.blMon != nil {
-		s.blMon.Close()
-	}
-	if s.volMon != nil {
-		s.volMon.Close()
-	}
-	if s.conn != nil {
-		s.conn.Close()
-	}
-	if s.sysConn != nil {
-		s.sysConn.Close()
-	}
-}
-
 func (s *Systower) Watch(ctx context.Context) error {
-	events := make(chan []event.Event, 16)
+	// Cleanup when context is cancelled
+	context.AfterFunc(ctx, func() {
+		s.sysConn.Close()
+	})
 
-	// Backlight monitor (optional)
-	if s.blMon != nil {
-		s.blMon.Listen(ctx, func(stats backlight.Stats) {
-			events <- []event.Event{{Kind: event.BacklightUpdated, Payload: stats}}
-		})
-	}
+	// Start all monitors - they return channels
+	blCh := s.blMon.Listen(ctx)
 
-	// Battery monitor
-	if err := s.batMon.Listen(ctx, func(info battery.Stats) {
-		events <- []event.Event{{Kind: event.BatteryUpdated, Payload: info}}
-	}); err != nil {
+	batCh, err := s.batMon.Listen(ctx)
+	if err != nil {
 		return fmt.Errorf("battery monitor: %w", err)
 	}
 
-	// Caffeine monitor
-	if err := s.caff.Listen(ctx, func(status string) {
-		events <- []event.Event{{Kind: event.CaffeineUpdated, Payload: status}}
-	}); err != nil {
+	caffCh, err := s.caff.Listen(ctx)
+	if err != nil {
 		return fmt.Errorf("caffeine monitor: %w", err)
 	}
 
-	// Volume monitor
-	if err := s.volMon.Listen(ctx, func(stats volume.Stats) {
-		events <- []event.Event{{Kind: event.VolumeUpdated, Payload: stats}}
-	}); err != nil {
+	volCh, err := s.volMon.Listen(ctx)
+	if err != nil {
 		return fmt.Errorf("volume monitor: %w", err)
 	}
 
-	// Polling readers - send events via channel
-	p := poller.New()
-	p.Register(s.intervals.Clock, func() event.Event {
-		return event.Event{Kind: event.ClockUpdated, Payload: s.clockReader.Read()}
-	})
-	p.Register(s.intervals.CPU, func() event.Event {
-		return event.Event{Kind: event.CPUUpdated, Payload: s.cpuReader.Read()}
-	})
-	p.Register(s.intervals.Mem, func() event.Event {
-		return event.Event{Kind: event.MemUpdated, Payload: s.memReader.Read()}
-	})
-	p.Register(s.intervals.Storage, func() event.Event {
-		return event.Event{Kind: event.StorageUpdated, Payload: s.storageReader.Read()}
-	})
-	p.Poll(ctx, func(batch []event.Event) {
-		events <- batch
-	})
+	// Calculate optimal ticker interval using GCD of all intervals
+	baseInterval := s.intervals.baseInterval()
+	ticker := time.NewTicker(baseInterval)
+	defer ticker.Stop()
 
-	// Main loop - single goroutine owns stats
+	// Convert intervals to tick counts based on base interval
+	baseSeconds := uint64(baseInterval / time.Second)
+	clockTicks := s.intervals.Clock / baseSeconds
+	cpuTicks := s.intervals.CPU / baseSeconds
+	memTicks := s.intervals.Mem / baseSeconds
+	storageTicks := s.intervals.Storage / baseSeconds
+
+	var tickCount uint64
+
+	// Read initial values
+	s.stats.Clock = s.clockReader.Read()
+	s.stats.CPU = s.cpuReader.Read()
+	s.stats.Mem = s.memReader.Read()
+	s.stats.Storage = s.storageReader.Read()
+	s.stats.Caffeine = s.caff.Read()
+	s.stats.Battery = s.batMon.Read(nil)
+
 	var lastStats Stats
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case batch := <-events:
-			for _, e := range batch {
-				s.dispatch(e)
+
+		case stats := <-blCh:
+			s.stats.Backlight = stats
+
+		case sig := <-batCh:
+			s.stats.Battery = s.batMon.Read(sig)
+			s.onBatteryUpdated(s.stats.Battery)
+
+		case <-caffCh:
+			s.stats.Caffeine = s.caff.Read()
+
+		case stats := <-volCh:
+			s.stats.Volume = stats
+
+		case <-ticker.C:
+			tickCount++
+			if tickCount%clockTicks == 0 {
+				s.stats.Clock = s.clockReader.Read()
 			}
-			if s.stats != lastStats {
-				lastStats = s.stats
-				os.Stdout.WriteString(s.output())
+			if tickCount%cpuTicks == 0 {
+				s.stats.CPU = s.cpuReader.Read()
 			}
+			if tickCount%memTicks == 0 {
+				s.stats.Mem = s.memReader.Read()
+			}
+			if tickCount%storageTicks == 0 {
+				s.stats.Storage = s.storageReader.Read()
+			}
+		}
+
+		if s.stats != lastStats {
+			lastStats = s.stats
+			os.Stdout.WriteString(s.output())
 		}
 	}
 }
 
-func (s *Systower) dispatch(e event.Event) {
-	switch e.Kind {
-	case event.BacklightUpdated:
-		s.stats.Backlight = e.Payload.(backlight.Stats)
-	case event.BatteryUpdated:
-		s.stats.Battery = e.Payload.(battery.Stats)
-	case event.CaffeineUpdated:
-		s.stats.Caffeine = e.Payload.(string)
-	case event.ClockUpdated:
-		s.stats.Clock = e.Payload.(clock.Stats)
-	case event.CPUUpdated:
-		s.stats.CPU = e.Payload.(cpu.Stats)
-	case event.MemUpdated:
-		s.stats.Mem = e.Payload.(mem.Stats)
-	case event.StorageUpdated:
-		s.stats.Storage = e.Payload.(storage.Stats)
-	case event.VolumeUpdated:
-		s.stats.Volume = e.Payload.(volume.Stats)
-	}
-
-	s.events.publish(e)
-}
-
-func (s *Systower) onBatteryUpdated(e event.Event) {
-	info := e.Payload.(battery.Stats)
+func (s *Systower) onBatteryUpdated(info battery.Stats) {
 	if info.Status != "charging" {
-		if s.caff.Read() == "on" && info.Percent < 15 {
+		if s.caff.Read().Active && info.Percent < 15 {
 			s.caff.Off()
-			s.notif.Send("Low battery, disable caffeine")
+			s.notify("Low battery, disable caffeine")
 		}
-		if info.Percent < 5 {
-			s.notif.Send("Battery almost drained, have a nice sleep")
-			go func() {
-				time.Sleep(5 * time.Second)
-				s.sysMgr.Poweroff()
-			}()
+		if info.Percent <= 5 {
+			s.notify("Battery almost drained, have a nice sleep")
+			time.Sleep(5 * time.Second)
+			s.poweroff()
 		}
 	}
+}
+
+func (s *Systower) notify(body string) {
+	exec.Command("notify-send", "Systower", body).Run()
+}
+
+func (s *Systower) poweroff() {
+	exec.Command("systemctl", "poweroff").Run()
 }
 
 func (s *Systower) Stats() Stats {
@@ -245,10 +225,10 @@ func (s *Systower) output() string {
 	fmt.Fprintf(&b, "bat_status|string|%s\n", s.stats.Battery.Status)
 	fmt.Fprintf(&b, "bat_percent|int|%d\n", s.stats.Battery.Percent)
 	fmt.Fprintf(&b, "bat_estimate|string|%s\n", s.stats.Battery.Estimate)
-	fmt.Fprintf(&b, "cpu_percent|float|%.5f\n", s.stats.CPU.Percent())
-	fmt.Fprintf(&b, "mem_used|float|%.5f\n", s.stats.Mem.TotalUsedInGB())
-	fmt.Fprintf(&b, "mem_percent|float|%.5f\n", s.stats.Mem.Percent())
-	fmt.Fprintf(&b, "storage_percent|float|%.5f\n", s.stats.Storage.Percent())
+	fmt.Fprintf(&b, "cpu_percent|int|%d\n", s.stats.CPU.Percent())
+	fmt.Fprintf(&b, "mem_used|int|%d\n", s.stats.Mem.TotalUsedInGB())
+	fmt.Fprintf(&b, "mem_percent|int|%d\n", s.stats.Mem.Percent())
+	fmt.Fprintf(&b, "storage_percent|int|%d\n", s.stats.Storage.Percent())
 	fmt.Fprintf(&b, "vol_percent|int|%d\n", s.stats.Volume.Percent)
 	fmt.Fprintf(&b, "vol_muted|bool|%t\n", s.stats.Volume.Muted)
 	b.WriteByte('\n')

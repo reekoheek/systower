@@ -2,6 +2,7 @@ package mem
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -24,19 +25,28 @@ func (s Stats) TotalUsed() uint64 {
 	return s.MemUsed + s.SwapUsed
 }
 
-func (s Stats) Percent() float64 {
+func (s Stats) Percent() int {
 	total := s.Total()
 	if total == 0 {
 		return 0
 	}
-	return float64(s.TotalUsed()) * 100 / float64(total)
+	return int(math.Round(float64(s.TotalUsed()) * 100 / float64(total)))
 }
 
-func (s Stats) TotalUsedInGB() float64 {
-	return float64(s.TotalUsed()) / 1024 / 1024
+func (s Stats) TotalUsedInGB() int {
+	return int(math.Round(float64(s.TotalUsed()) / 1024 / 1024))
 }
 
-type Reader struct{}
+func (s Stats) MemPercent() int {
+	if s.Mem == 0 {
+		return 0
+	}
+	return int(math.Round(float64(s.MemUsed) * 100 / float64(s.Mem)))
+}
+
+type Reader struct {
+	prev Stats
+}
 
 func New() *Reader {
 	return &Reader{}
@@ -44,16 +54,24 @@ func New() *Reader {
 
 func (r *Reader) Read() Stats {
 	memTotal, memAvailable := r.readMemInfo()
-	swapTotal, swapUsed := r.readSwapFile()
+	memUsed := memTotal - memAvailable
 
-	return Stats{
+	// Only read swap if memPercent increased (more memory used)
+	swapTotal, swapUsed := r.prev.Swap, r.prev.SwapUsed
+	curr := Stats{Mem: memTotal, MemUsed: memUsed}
+	if curr.MemPercent() > r.prev.MemPercent() {
+		swapTotal, swapUsed = r.readSwapFile()
+	}
+
+	r.prev = Stats{
 		Mem:      memTotal,
-		MemUsed:  memTotal - memAvailable,
+		MemUsed:  memUsed,
 		MemFree:  memAvailable,
 		Swap:     swapTotal,
 		SwapUsed: swapUsed,
 		SwapFree: swapTotal - swapUsed,
 	}
+	return r.prev
 }
 
 func (r *Reader) readMemInfo() (memTotal, memAvailable uint64) {

@@ -24,12 +24,6 @@ func (a *WaylandAdapter) Off() {
 	os.Remove(a.lockfile)
 }
 
-func (a *WaylandAdapter) Status() string {
-	if _, err := os.Stat(a.lockfile); err == nil {
-		return "on"
-	}
-	return "off"
-}
 
 func (a *WaylandAdapter) startSwayidle() {
 	cmd := exec.Command("swayidle", "-w",
