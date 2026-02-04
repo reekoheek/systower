@@ -47,7 +47,12 @@ func (m *Monitor) detectBattery() error {
 	return fmt.Errorf("no battery found")
 }
 
-func (m *Monitor) Read() Stats {
+func (m *Monitor) Read(sig *dbus.Signal) Stats {
+	if sig == nil {
+		m.fetchInitial()
+	} else if sig.Path == m.path && sig.Name == propsIface+"."+propsChangedSignal {
+		m.parseSignal(sig.Body)
+	}
 	return m.info
 }
 
@@ -151,7 +156,7 @@ func (m *Monitor) fetchInitial() error {
 	return nil
 }
 
-func (m *Monitor) Listen(ctx context.Context) (<-chan Stats, error) {
+func (m *Monitor) Listen(ctx context.Context) (<-chan *dbus.Signal, error) {
 	if err := m.detectBattery(); err != nil {
 		return nil, err
 	}
@@ -165,33 +170,13 @@ func (m *Monitor) Listen(ctx context.Context) (<-chan Stats, error) {
 		return nil, fmt.Errorf("failed to add match rule: %w", err)
 	}
 
-	ch := make(chan Stats, 1)
+	ch := make(chan *dbus.Signal, 1)
+	m.conn.Signal(ch)
 
-	go func() {
-		defer close(ch)
-
-		// Fetch initial state before listening for changes
-		if err := m.fetchInitial(); err == nil {
-			ch <- m.info
-		}
-
-		signals := make(chan *dbus.Signal, 10)
-		m.conn.Signal(signals)
-
-		for {
-			select {
-			case <-ctx.Done():
-				m.conn.RemoveSignal(signals)
-				return
-			case sig := <-signals:
-				if sig.Path == m.path && sig.Name == propsIface+"."+propsChangedSignal {
-					if m.parseSignal(sig.Body) {
-						ch <- m.info
-					}
-				}
-			}
-		}
-	}()
+	context.AfterFunc(ctx, func() {
+		m.conn.RemoveSignal(ch)
+	})
 
 	return ch, nil
 }
+

@@ -122,6 +122,8 @@ func (s *Systower) Watch(ctx context.Context) error {
 	s.stats.CPU = s.cpuReader.Read()
 	s.stats.Mem = s.memReader.Read()
 	s.stats.Storage = s.storageReader.Read()
+	s.stats.Caffeine = s.caff.Read()
+	s.stats.Battery = s.batMon.Read(nil)
 
 	var lastStats Stats
 
@@ -133,12 +135,12 @@ func (s *Systower) Watch(ctx context.Context) error {
 		case stats := <-blCh:
 			s.stats.Backlight = stats
 
-		case stats := <-batCh:
-			s.stats.Battery = stats
-			s.onBatteryUpdated(stats)
+		case sig := <-batCh:
+			s.stats.Battery = s.batMon.Read(sig)
+			s.onBatteryUpdated(s.stats.Battery)
 
-		case status := <-caffCh:
-			s.stats.Caffeine = status
+		case <-caffCh:
+			s.stats.Caffeine = s.caff.Read()
 
 		case stats := <-volCh:
 			s.stats.Volume = stats
@@ -163,12 +165,10 @@ func (s *Systower) onBatteryUpdated(info battery.Stats) {
 			s.caff.Off()
 			s.notify("Low battery, disable caffeine")
 		}
-		if info.Percent < 5 {
+		if info.Percent <= 5 {
 			s.notify("Battery almost drained, have a nice sleep")
-			go func() {
-				time.Sleep(5 * time.Second)
-				s.poweroff()
-			}()
+			time.Sleep(5 * time.Second)
+			s.poweroff()
 		}
 	}
 }

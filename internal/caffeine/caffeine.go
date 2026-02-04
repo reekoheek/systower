@@ -53,30 +53,18 @@ func (c *Caffeine) Toggle() {
 	}
 }
 
-func (c *Caffeine) Listen(ctx context.Context) (<-chan string, error) {
+func (c *Caffeine) Listen(ctx context.Context) (<-chan *dbus.Signal, error) {
 	matchRule := fmt.Sprintf("type='signal',interface='%s',member='%s'", dbusInterface, dbusSignal)
 	if err := c.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
 		return nil, fmt.Errorf("failed to add match rule: %w", err)
 	}
 
-	ch := make(chan string, 1)
-	signals := make(chan *dbus.Signal, 10)
-	c.conn.Signal(signals)
+	ch := make(chan *dbus.Signal, 1)
+	c.conn.Signal(ch)
 
-	go func() {
-		defer close(ch)
-
-		ch <- c.Read()
-		for {
-			select {
-			case <-ctx.Done():
-				c.conn.RemoveSignal(signals)
-				return
-			case <-signals:
-				ch <- c.Read()
-			}
-		}
-	}()
+	context.AfterFunc(ctx, func() {
+		c.conn.RemoveSignal(ch)
+	})
 
 	return ch, nil
 }
