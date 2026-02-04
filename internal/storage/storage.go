@@ -2,7 +2,10 @@
 
 package storage
 
-import "syscall"
+import (
+	"math"
+	"syscall"
+)
 
 type Stats struct {
 	Total uint64 // bytes
@@ -10,11 +13,11 @@ type Stats struct {
 	Free  uint64 // bytes
 }
 
-func (s Stats) Percent() float64 {
+func (s Stats) Percent() int {
 	if s.Total == 0 {
 		return 0
 	}
-	return float64(s.Used) * 100 / float64(s.Total)
+	return int(math.Round(float64(s.Used) * 100 / float64(s.Total)))
 }
 
 type Reader struct {

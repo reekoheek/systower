@@ -2,6 +2,7 @@ package cpu
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -12,11 +13,11 @@ type Stats struct {
 	Total uint64
 }
 
-func (s Stats) Percent() float64 {
+func (s Stats) Percent() int {
 	if s.Total == 0 {
 		return 0
 	}
-	return 100 - float64(s.Idle)*100/float64(s.Total)
+	return int(math.Round(100 - float64(s.Idle)*100/float64(s.Total)))
 }
 
 type Reader struct {
