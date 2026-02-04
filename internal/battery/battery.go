@@ -22,7 +22,7 @@ type Stats struct {
 type Monitor struct {
 	conn *dbus.Conn
 	path dbus.ObjectPath
-	info Stats
+	last Stats
 }
 
 func New(conn *dbus.Conn) *Monitor {
@@ -49,11 +49,14 @@ func (m *Monitor) detectBattery() error {
 
 func (m *Monitor) Read(sig *dbus.Signal) Stats {
 	if sig == nil {
-		m.fetchInitial()
-	} else if sig.Path == m.path && sig.Name == propsIface+"."+propsChangedSignal {
-		m.parseSignal(sig.Body)
+		if stats, ok := m.fetchStats(); ok {
+			m.last = stats
+		}
+	} else if stats, ok := m.parseSignal(sig); ok {
+		m.last = stats
 	}
-	return m.info
+
+	return m.last
 }
 
 var stateNames = map[uint32]string{
@@ -65,22 +68,27 @@ var stateNames = map[uint32]string{
 	6: "discharging", // pending discharge
 }
 
-func (m *Monitor) parseSignal(body []interface{}) bool {
-	if len(body) < 2 {
-		return false
+func (m *Monitor) parseSignal(sig *dbus.Signal) (Stats, bool) {
+	if sig.Path != m.path || sig.Name != propsIface+"."+propsChangedSignal {
+		return Stats{}, false
 	}
 
-	props, ok := body[1].(map[string]dbus.Variant)
+	if len(sig.Body) < 2 {
+		return Stats{}, false
+	}
+
+	props, ok := sig.Body[1].(map[string]dbus.Variant)
 	if !ok {
-		return false
+		return Stats{}, false
 	}
 
+	stats := m.last
 	changed := false
 
 	if v, ok := props["State"]; ok {
 		if state, ok := v.Value().(uint32); ok {
 			if name, ok := stateNames[state]; ok {
-				m.info.Status = name
+				stats.Status = name
 				changed = true
 			}
 		}
@@ -88,7 +96,7 @@ func (m *Monitor) parseSignal(body []interface{}) bool {
 
 	if v, ok := props["Percentage"]; ok {
 		if pct, ok := v.Value().(float64); ok {
-			m.info.Percent = int(pct)
+			stats.Percent = int(pct)
 			changed = true
 		}
 	}
@@ -109,34 +117,36 @@ func (m *Monitor) parseSignal(body []interface{}) bool {
 
 	if estimateFound {
 		if seconds > 0 {
-			m.info.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+			stats.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
 		} else {
-			m.info.Estimate = ""
+			stats.Estimate = ""
 		}
 		changed = true
 	}
 
-	return changed
+	return stats, changed
 }
 
-func (m *Monitor) fetchInitial() error {
+func (m *Monitor) fetchStats() (Stats, bool) {
 	obj := m.conn.Object("org.freedesktop.UPower", m.path)
 	var props map[string]dbus.Variant
 	if err := obj.Call(propsIface+".GetAll", 0, "org.freedesktop.UPower.Device").Store(&props); err != nil {
-		return err
+		return Stats{}, false
 	}
+
+	var stats Stats
 
 	if v, ok := props["State"]; ok {
 		if state, ok := v.Value().(uint32); ok {
 			if name, ok := stateNames[state]; ok {
-				m.info.Status = name
+				stats.Status = name
 			}
 		}
 	}
 
 	if v, ok := props["Percentage"]; ok {
 		if pct, ok := v.Value().(float64); ok {
-			m.info.Percent = int(pct)
+			stats.Percent = int(pct)
 		}
 	}
 
@@ -150,10 +160,10 @@ func (m *Monitor) fetchInitial() error {
 		}
 	}
 	if seconds > 0 {
-		m.info.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
+		stats.Estimate = fmt.Sprintf("%02d:%02d", seconds/3600, (seconds%3600)/60)
 	}
 
-	return nil
+	return stats, true
 }
 
 func (m *Monitor) Listen(ctx context.Context) (<-chan *dbus.Signal, error) {
@@ -179,4 +189,3 @@ func (m *Monitor) Listen(ctx context.Context) (<-chan *dbus.Signal, error) {
 
 	return ch, nil
 }
-
