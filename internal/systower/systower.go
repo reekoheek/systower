@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 type Stats struct {
 	Backlight backlight.Stats
 	Clock     clock.Stats
-	Caffeine  string
+	Caffeine  caffeine.Stats
 	Battery   battery.Stats
 	CPU       cpu.Stats
 	Mem       mem.Stats
@@ -57,7 +58,6 @@ func (i Intervals) baseInterval() time.Duration {
 }
 
 type Systower struct {
-	conn      *dbus.Conn
 	sysConn   *dbus.Conn
 	caff      *caffeine.Caffeine
 	blMon     *backlight.Monitor
@@ -73,28 +73,20 @@ type Systower struct {
 }
 
 func New(intervals Intervals) (*Systower, error) {
-	conn, err := dbus.SessionBus()
-	if err != nil {
-		return nil, fmt.Errorf("session bus: %w", err)
-	}
-
 	sysConn, err := dbus.SystemBus()
 	if err != nil {
-		conn.Close()
 		return nil, fmt.Errorf("system bus: %w", err)
 	}
 
 	blMon, err := backlight.New("")
 	if err != nil {
-		conn.Close()
 		sysConn.Close()
 		return nil, fmt.Errorf("backlight monitor: %w", err)
 	}
 
 	s := &Systower{
-		conn:          conn,
 		sysConn:       sysConn,
-		caff:          caffeine.New(conn, caffeine.DetectAdapter()),
+		caff:          caffeine.New(caffeine.DetectAdapter()),
 		blMon:         blMon,
 		batMon:        battery.New(sysConn),
 		volMon:        volume.New(),
@@ -111,7 +103,6 @@ func New(intervals Intervals) (*Systower, error) {
 func (s *Systower) Watch(ctx context.Context) error {
 	// Cleanup when context is cancelled
 	context.AfterFunc(ctx, func() {
-		s.conn.Close()
 		s.sysConn.Close()
 	})
 
@@ -200,7 +191,7 @@ func (s *Systower) Watch(ctx context.Context) error {
 
 func (s *Systower) onBatteryUpdated(info battery.Stats) {
 	if info.Status != "charging" {
-		if s.caff.Read() == "on" && info.Percent < 15 {
+		if s.caff.Read().Active && info.Percent < 15 {
 			s.caff.Off()
 			s.notify("Low battery, disable caffeine")
 		}
@@ -213,15 +204,11 @@ func (s *Systower) onBatteryUpdated(info battery.Stats) {
 }
 
 func (s *Systower) notify(body string) {
-	s.conn.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications").
-		Call("org.freedesktop.Notifications.Notify", 0,
-			"systower", uint32(0), "", "Systower", body,
-			[]string{}, map[string]dbus.Variant{}, int32(-1))
+	exec.Command("notify-send", "Systower", body).Run()
 }
 
 func (s *Systower) poweroff() {
-	s.sysConn.Object("org.freedesktop.login1", "/org/freedesktop/login1").
-		Call("org.freedesktop.login1.Manager.PowerOff", 0, false)
+	exec.Command("systemctl", "poweroff").Run()
 }
 
 func (s *Systower) Stats() Stats {

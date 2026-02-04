@@ -2,25 +2,14 @@ package caffeine
 
 import "testing"
 
-type mockAdapter struct {
-	status string
-}
+type mockAdapter struct{}
 
-func (m *mockAdapter) On() {
-	m.status = "on"
-}
-
-func (m *mockAdapter) Off() {
-	m.status = "off"
-}
-
-func (m *mockAdapter) Status() string {
-	return m.status
-}
+func (m *mockAdapter) On()  {}
+func (m *mockAdapter) Off() {}
 
 func TestNew(t *testing.T) {
-	adapter := &mockAdapter{status: "off"}
-	c := New(nil, adapter)
+	adapter := &mockAdapter{}
+	c := New(adapter)
 
 	if c == nil {
 		t.Error("New() should not return nil")
@@ -31,68 +20,57 @@ func TestNew(t *testing.T) {
 }
 
 func TestCaffeine_Read(t *testing.T) {
-	adapter := &mockAdapter{status: "off"}
-	c := New(nil, adapter)
+	adapter := &mockAdapter{}
+	c := New(adapter)
 
-	if got := c.Read(); got != "off" {
-		t.Errorf("Read() = %v, want off", got)
+	// Initially should be off (false)
+	if got := c.Read(); got.Active {
+		t.Errorf("Read().Active = %v, want false", got.Active)
 	}
 
-	adapter.status = "on"
-	if got := c.Read(); got != "on" {
-		t.Errorf("Read() = %v, want on", got)
+	// After On(), should be on (true)
+	c.On()
+	if got := c.Read(); !got.Active {
+		t.Errorf("Read().Active = %v, want true", got.Active)
+	}
+
+	// After Off(), should be off (false)
+	c.Off()
+	if got := c.Read(); got.Active {
+		t.Errorf("Read().Active = %v, want false", got.Active)
 	}
 }
 
-func TestCaffeine_ToggleLogic(t *testing.T) {
-	// Test toggle logic without D-Bus
-	// Toggle calls On/Off which call emitSignal requiring D-Bus
-	// So we test the adapter directly to verify toggle logic works
+func TestCaffeine_Toggle(t *testing.T) {
+	adapter := &mockAdapter{}
+	c := New(adapter)
+
+	// Initially off, toggle should turn on
+	c.Toggle()
+	if got := c.Read(); !got.Active {
+		t.Errorf("after toggle from off, Read().Active = %v, want true", got.Active)
+	}
+
+	// Now on, toggle should turn off
+	c.Toggle()
+	if got := c.Read(); got.Active {
+		t.Errorf("after toggle from on, Read().Active = %v, want false", got.Active)
+	}
+}
+
+func TestStats_String(t *testing.T) {
 	tests := []struct {
-		name       string
-		initial    string
-		wantStatus string
+		active bool
+		want   string
 	}{
-		{
-			name:       "toggle from off to on",
-			initial:    "off",
-			wantStatus: "on",
-		},
-		{
-			name:       "toggle from on to off",
-			initial:    "on",
-			wantStatus: "off",
-		},
+		{true, "on"},
+		{false, "off"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			adapter := &mockAdapter{status: tt.initial}
-
-			// Simulate toggle logic
-			if adapter.Status() == "on" {
-				adapter.Off()
-			} else {
-				adapter.On()
-			}
-
-			if got := adapter.Status(); got != tt.wantStatus {
-				t.Errorf("after toggle, Status() = %v, want %v", got, tt.wantStatus)
-			}
-		})
-	}
-}
-
-func TestMockAdapter_OnOff(t *testing.T) {
-	adapter := &mockAdapter{status: "off"}
-
-	adapter.On()
-	if got := adapter.Status(); got != "on" {
-		t.Errorf("after On(), Status() = %v, want on", got)
-	}
-
-	adapter.Off()
-	if got := adapter.Status(); got != "off" {
-		t.Errorf("after Off(), Status() = %v, want off", got)
+		s := Stats{Active: tt.active}
+		if got := s.String(); got != tt.want {
+			t.Errorf("Stats{Active: %v}.String() = %q, want %q", tt.active, got, tt.want)
+		}
 	}
 }

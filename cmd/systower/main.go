@@ -7,7 +7,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/godbus/dbus/v5"
 	"github.com/reekoheek/systower/internal/caffeine"
 	"github.com/reekoheek/systower/internal/systower"
 )
@@ -60,14 +59,7 @@ func runCaffeine() {
 		os.Exit(1)
 	}
 
-	conn, err := dbus.SessionBus()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	defer conn.Close()
-
-	caff := caffeine.New(conn, caffeine.DetectAdapter())
+	caff := caffeine.New(caffeine.DetectAdapter())
 
 	switch os.Args[2] {
 	case "on":
