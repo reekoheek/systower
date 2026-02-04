@@ -87,13 +87,17 @@ func (m *Monitor) Read() Stats {
 	}
 }
 
-func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) {
+func (m *Monitor) Listen(ctx context.Context) <-chan Stats {
+	ch := make(chan Stats, 1)
+
 	go func() {
+		defer close(ch)
+
 		context.AfterFunc(ctx, func() {
 			syscall.Write(m.cancelPipe[1], []byte{0})
 		})
 
-		callback(m.Read())
+		ch <- m.Read()
 
 		buf := make([]byte, 4096)
 		fds := []unix.PollFd{
@@ -123,11 +127,13 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) {
 					continue
 				}
 				if m.isBacklightEvent(buf[:n]) {
-					callback(m.Read())
+					ch <- m.Read()
 				}
 			}
 		}
 	}()
+
+	return ch
 }
 
 func (m *Monitor) Close() {

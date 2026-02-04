@@ -13,12 +13,8 @@ import (
 	"github.com/reekoheek/systower/internal/caffeine"
 	"github.com/reekoheek/systower/internal/clock"
 	"github.com/reekoheek/systower/internal/cpu"
-	"github.com/reekoheek/systower/internal/event"
 	"github.com/reekoheek/systower/internal/mem"
-	"github.com/reekoheek/systower/internal/notification"
-	"github.com/reekoheek/systower/internal/poller"
 	"github.com/reekoheek/systower/internal/storage"
-	"github.com/reekoheek/systower/internal/sys"
 	"github.com/reekoheek/systower/internal/volume"
 )
 
@@ -33,34 +29,22 @@ type Stats struct {
 	Volume    volume.Stats
 }
 
-type Intervals struct {
-	Clock   time.Duration
-	CPU     time.Duration
-	Mem     time.Duration
-	Storage time.Duration
-}
-
 type Systower struct {
 	conn    *dbus.Conn
 	sysConn *dbus.Conn
 	caff    *caffeine.Caffeine
-	notif   *notification.Notification
 	blMon   *backlight.Monitor
 	batMon  *battery.Monitor
 	volMon  *volume.Monitor
-	sysMgr  *sys.Sys
 	stats   Stats
-	events  *eventBus
 
 	clockReader   *clock.Reader
 	cpuReader     *cpu.Reader
 	memReader     *mem.Reader
 	storageReader *storage.Reader
-
-	intervals Intervals
 }
 
-func New(intervals Intervals) (*Systower, error) {
+func New() (*Systower, error) {
 	conn, err := dbus.SessionBus()
 	if err != nil {
 		return nil, fmt.Errorf("session bus: %w", err)
@@ -79,156 +63,126 @@ func New(intervals Intervals) (*Systower, error) {
 		return nil, fmt.Errorf("volume monitor: %w", err)
 	}
 
-	// Backlight monitor is optional (may not exist on desktops)
-	blMon, _ := backlight.New("")
+	blMon, err := backlight.New("")
+	if err != nil {
+		conn.Close()
+		sysConn.Close()
+		volMon.Close()
+		return nil, fmt.Errorf("backlight monitor: %w", err)
+	}
 
 	s := &Systower{
 		conn:          conn,
 		sysConn:       sysConn,
 		caff:          caffeine.New(conn, caffeine.DetectAdapter()),
-		notif:         notification.New(conn, "Systower"),
 		blMon:         blMon,
 		batMon:        battery.New(sysConn),
 		volMon:        volMon,
-		sysMgr:        sys.New(sysConn),
-		events:        newEventBus(),
 		clockReader:   clock.New(),
 		cpuReader:     cpu.New(),
 		memReader:     mem.New(),
 		storageReader: storage.New("/"),
-		intervals:     intervals,
 	}
-
-	s.On(event.BatteryUpdated, s.onBatteryUpdated)
 
 	return s, nil
 }
 
-func (s *Systower) On(kind event.Kind, h EventHandler) {
-	s.events.on(kind, h)
-}
-
 func (s *Systower) Close() {
-	if s.blMon != nil {
-		s.blMon.Close()
-	}
-	if s.volMon != nil {
-		s.volMon.Close()
-	}
-	if s.conn != nil {
-		s.conn.Close()
-	}
-	if s.sysConn != nil {
-		s.sysConn.Close()
-	}
+	s.blMon.Close()
+	s.volMon.Close()
+	s.conn.Close()
+	s.sysConn.Close()
 }
 
 func (s *Systower) Watch(ctx context.Context) error {
-	events := make(chan []event.Event, 16)
+	// Start all monitors - they return channels
+	blCh := s.blMon.Listen(ctx)
 
-	// Backlight monitor (optional)
-	if s.blMon != nil {
-		s.blMon.Listen(ctx, func(stats backlight.Stats) {
-			events <- []event.Event{{Kind: event.BacklightUpdated, Payload: stats}}
-		})
-	}
-
-	// Battery monitor
-	if err := s.batMon.Listen(ctx, func(info battery.Stats) {
-		events <- []event.Event{{Kind: event.BatteryUpdated, Payload: info}}
-	}); err != nil {
+	batCh, err := s.batMon.Listen(ctx)
+	if err != nil {
 		return fmt.Errorf("battery monitor: %w", err)
 	}
 
-	// Caffeine monitor
-	if err := s.caff.Listen(ctx, func(status string) {
-		events <- []event.Event{{Kind: event.CaffeineUpdated, Payload: status}}
-	}); err != nil {
+	caffCh, err := s.caff.Listen(ctx)
+	if err != nil {
 		return fmt.Errorf("caffeine monitor: %w", err)
 	}
 
-	// Volume monitor
-	if err := s.volMon.Listen(ctx, func(stats volume.Stats) {
-		events <- []event.Event{{Kind: event.VolumeUpdated, Payload: stats}}
-	}); err != nil {
+	volCh, err := s.volMon.Listen(ctx)
+	if err != nil {
 		return fmt.Errorf("volume monitor: %w", err)
 	}
 
-	// Polling readers - send events via channel
-	p := poller.New()
-	p.Register(s.intervals.Clock, func() event.Event {
-		return event.Event{Kind: event.ClockUpdated, Payload: s.clockReader.Read()}
-	})
-	p.Register(s.intervals.CPU, func() event.Event {
-		return event.Event{Kind: event.CPUUpdated, Payload: s.cpuReader.Read()}
-	})
-	p.Register(s.intervals.Mem, func() event.Event {
-		return event.Event{Kind: event.MemUpdated, Payload: s.memReader.Read()}
-	})
-	p.Register(s.intervals.Storage, func() event.Event {
-		return event.Event{Kind: event.StorageUpdated, Payload: s.storageReader.Read()}
-	})
-	p.Poll(ctx, func(batch []event.Event) {
-		events <- batch
-	})
+	// Single ticker for all readers
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
-	// Main loop - single goroutine owns stats
+	// Read initial values
+	s.stats.Clock = s.clockReader.Read()
+	s.stats.CPU = s.cpuReader.Read()
+	s.stats.Mem = s.memReader.Read()
+	s.stats.Storage = s.storageReader.Read()
+
 	var lastStats Stats
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case batch := <-events:
-			for _, e := range batch {
-				s.dispatch(e)
-			}
-			if s.stats != lastStats {
-				lastStats = s.stats
-				os.Stdout.WriteString(s.output())
-			}
+
+		case stats := <-blCh:
+			s.stats.Backlight = stats
+
+		case stats := <-batCh:
+			s.stats.Battery = stats
+			s.onBatteryUpdated(stats)
+
+		case status := <-caffCh:
+			s.stats.Caffeine = status
+
+		case stats := <-volCh:
+			s.stats.Volume = stats
+
+		case <-ticker.C:
+			s.stats.Clock = s.clockReader.Read()
+			s.stats.CPU = s.cpuReader.Read()
+			s.stats.Mem = s.memReader.Read()
+			s.stats.Storage = s.storageReader.Read()
+		}
+
+		if s.stats != lastStats {
+			lastStats = s.stats
+			os.Stdout.WriteString(s.output())
 		}
 	}
 }
 
-func (s *Systower) dispatch(e event.Event) {
-	switch e.Kind {
-	case event.BacklightUpdated:
-		s.stats.Backlight = e.Payload.(backlight.Stats)
-	case event.BatteryUpdated:
-		s.stats.Battery = e.Payload.(battery.Stats)
-	case event.CaffeineUpdated:
-		s.stats.Caffeine = e.Payload.(string)
-	case event.ClockUpdated:
-		s.stats.Clock = e.Payload.(clock.Stats)
-	case event.CPUUpdated:
-		s.stats.CPU = e.Payload.(cpu.Stats)
-	case event.MemUpdated:
-		s.stats.Mem = e.Payload.(mem.Stats)
-	case event.StorageUpdated:
-		s.stats.Storage = e.Payload.(storage.Stats)
-	case event.VolumeUpdated:
-		s.stats.Volume = e.Payload.(volume.Stats)
-	}
-
-	s.events.publish(e)
-}
-
-func (s *Systower) onBatteryUpdated(e event.Event) {
-	info := e.Payload.(battery.Stats)
+func (s *Systower) onBatteryUpdated(info battery.Stats) {
 	if info.Status != "charging" {
 		if s.caff.Read() == "on" && info.Percent < 15 {
 			s.caff.Off()
-			s.notif.Send("Low battery, disable caffeine")
+			s.notify("Low battery, disable caffeine")
 		}
 		if info.Percent < 5 {
-			s.notif.Send("Battery almost drained, have a nice sleep")
+			s.notify("Battery almost drained, have a nice sleep")
 			go func() {
 				time.Sleep(5 * time.Second)
-				s.sysMgr.Poweroff()
+				s.poweroff()
 			}()
 		}
 	}
+}
+
+func (s *Systower) notify(body string) {
+	s.conn.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications").
+		Call("org.freedesktop.Notifications.Notify", 0,
+			"systower", uint32(0), "", "Systower", body,
+			[]string{}, map[string]dbus.Variant{}, int32(-1))
+}
+
+func (s *Systower) poweroff() {
+	s.sysConn.Object("org.freedesktop.login1", "/org/freedesktop/login1").
+		Call("org.freedesktop.login1.Manager.PowerOff", 0, false)
 }
 
 func (s *Systower) Stats() Stats {

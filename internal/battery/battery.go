@@ -151,9 +151,9 @@ func (m *Monitor) fetchInitial() error {
 	return nil
 }
 
-func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
+func (m *Monitor) Listen(ctx context.Context) (<-chan Stats, error) {
 	if err := m.detectBattery(); err != nil {
-		return err
+		return nil, err
 	}
 
 	matchRule := fmt.Sprintf(
@@ -162,13 +162,17 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 	)
 
 	if err := m.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
-		return fmt.Errorf("failed to add match rule: %w", err)
+		return nil, fmt.Errorf("failed to add match rule: %w", err)
 	}
 
+	ch := make(chan Stats, 1)
+
 	go func() {
+		defer close(ch)
+
 		// Fetch initial state before listening for changes
 		if err := m.fetchInitial(); err == nil {
-			callback(m.info)
+			ch <- m.info
 		}
 
 		signals := make(chan *dbus.Signal, 10)
@@ -182,12 +186,12 @@ func (m *Monitor) Listen(ctx context.Context, callback func(Stats)) error {
 			case sig := <-signals:
 				if sig.Path == m.path && sig.Name == propsIface+"."+propsChangedSignal {
 					if m.parseSignal(sig.Body) {
-						callback(m.info)
+						ch <- m.info
 					}
 				}
 			}
 		}
 	}()
 
-	return nil
+	return ch, nil
 }

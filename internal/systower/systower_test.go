@@ -1,18 +1,9 @@
 package systower
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
 func TestNew(t *testing.T) {
-	s, err := New(Intervals{
-		Clock:   time.Second,
-		CPU:     time.Second,
-		Mem:     time.Second,
-		Storage: time.Second,
-	})
-
+	s, err := New()
 	if err != nil {
 		t.Skipf("skipping test due to dbus unavailable: %v", err)
 	}

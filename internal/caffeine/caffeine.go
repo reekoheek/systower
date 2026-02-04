@@ -3,10 +3,10 @@ package caffeine
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/reekoheek/systower/internal/sys"
 )
 
 const (
@@ -53,35 +53,49 @@ func (c *Caffeine) Toggle() {
 	}
 }
 
-func (c *Caffeine) Listen(ctx context.Context, callback func(string)) error {
+func (c *Caffeine) Listen(ctx context.Context) (<-chan string, error) {
 	matchRule := fmt.Sprintf("type='signal',interface='%s',member='%s'", dbusInterface, dbusSignal)
 	if err := c.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
-		return fmt.Errorf("failed to add match rule: %w", err)
+		return nil, fmt.Errorf("failed to add match rule: %w", err)
 	}
 
+	ch := make(chan string, 1)
 	signals := make(chan *dbus.Signal, 10)
 	c.conn.Signal(signals)
 
 	go func() {
-		callback(c.Read())
+		defer close(ch)
+
+		ch <- c.Read()
 		for {
 			select {
 			case <-ctx.Done():
 				c.conn.RemoveSignal(signals)
 				return
 			case <-signals:
-				callback(c.Read())
+				ch <- c.Read()
 			}
 		}
 	}()
 
-	return nil
+	return ch, nil
 }
 
 func DetectAdapter() Adapter {
-	if !sys.IsWayland() {
+	if !isWayland() {
 		return NewX11Adapter()
 	}
-	lockfile := filepath.Join(sys.GetRuntimeDir(), "swayidle.lock")
+	lockfile := filepath.Join(getRuntimeDir(), "swayidle.lock")
 	return NewWaylandAdapter(lockfile)
+}
+
+func isWayland() bool {
+	return os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland"
+}
+
+func getRuntimeDir() string {
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return dir
+	}
+	return "/tmp"
 }
