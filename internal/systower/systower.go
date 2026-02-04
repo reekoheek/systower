@@ -29,14 +29,21 @@ type Stats struct {
 	Volume    volume.Stats
 }
 
+type Intervals struct {
+	CPU     uint64
+	Mem     uint64
+	Storage uint64
+}
+
 type Systower struct {
-	conn    *dbus.Conn
-	sysConn *dbus.Conn
-	caff    *caffeine.Caffeine
-	blMon   *backlight.Monitor
-	batMon  *battery.Monitor
-	volMon  *volume.Monitor
-	stats   Stats
+	conn      *dbus.Conn
+	sysConn   *dbus.Conn
+	caff      *caffeine.Caffeine
+	blMon     *backlight.Monitor
+	batMon    *battery.Monitor
+	volMon    *volume.Monitor
+	stats     Stats
+	intervals Intervals
 
 	clockReader   *clock.Reader
 	cpuReader     *cpu.Reader
@@ -44,7 +51,7 @@ type Systower struct {
 	storageReader *storage.Reader
 }
 
-func New() (*Systower, error) {
+func New(intervals Intervals) (*Systower, error) {
 	conn, err := dbus.SessionBus()
 	if err != nil {
 		return nil, fmt.Errorf("session bus: %w", err)
@@ -70,6 +77,7 @@ func New() (*Systower, error) {
 		blMon:         blMon,
 		batMon:        battery.New(sysConn),
 		volMon:        volume.New(),
+		intervals:     intervals,
 		clockReader:   clock.New(),
 		cpuReader:     cpu.New(),
 		memReader:     mem.New(),
@@ -104,9 +112,11 @@ func (s *Systower) Watch(ctx context.Context) error {
 		return fmt.Errorf("volume monitor: %w", err)
 	}
 
-	// Single ticker for all readers
+	// Single ticker with counters for different intervals
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+
+	var tickCount uint64
 
 	// Read initial values
 	s.stats.Clock = s.clockReader.Read()
@@ -137,10 +147,17 @@ func (s *Systower) Watch(ctx context.Context) error {
 			s.stats.Volume = stats
 
 		case <-ticker.C:
+			tickCount++
 			s.stats.Clock = s.clockReader.Read()
-			s.stats.CPU = s.cpuReader.Read()
-			s.stats.Mem = s.memReader.Read()
-			s.stats.Storage = s.storageReader.Read()
+			if tickCount%s.intervals.CPU == 0 {
+				s.stats.CPU = s.cpuReader.Read()
+			}
+			if tickCount%s.intervals.Mem == 0 {
+				s.stats.Mem = s.memReader.Read()
+			}
+			if tickCount%s.intervals.Storage == 0 {
+				s.stats.Storage = s.storageReader.Read()
+			}
 		}
 
 		if s.stats != lastStats {

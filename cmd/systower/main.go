@@ -34,7 +34,11 @@ func main() {
 }
 
 func runWatch() {
-	s, err := systower.New()
+	s, err := systower.New(systower.Intervals{
+		CPU:     3,
+		Mem:     3,
+		Storage: 60,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
