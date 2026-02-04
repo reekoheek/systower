@@ -56,18 +56,10 @@ func New() (*Systower, error) {
 		return nil, fmt.Errorf("system bus: %w", err)
 	}
 
-	volMon, err := volume.New()
-	if err != nil {
-		conn.Close()
-		sysConn.Close()
-		return nil, fmt.Errorf("volume monitor: %w", err)
-	}
-
 	blMon, err := backlight.New("")
 	if err != nil {
 		conn.Close()
 		sysConn.Close()
-		volMon.Close()
 		return nil, fmt.Errorf("backlight monitor: %w", err)
 	}
 
@@ -77,7 +69,7 @@ func New() (*Systower, error) {
 		caff:          caffeine.New(conn, caffeine.DetectAdapter()),
 		blMon:         blMon,
 		batMon:        battery.New(sysConn),
-		volMon:        volMon,
+		volMon:        volume.New(),
 		clockReader:   clock.New(),
 		cpuReader:     cpu.New(),
 		memReader:     mem.New(),
@@ -90,7 +82,6 @@ func New() (*Systower, error) {
 func (s *Systower) Watch(ctx context.Context) error {
 	// Cleanup when context is cancelled
 	context.AfterFunc(ctx, func() {
-		s.volMon.Close()
 		s.conn.Close()
 		s.sysConn.Close()
 	})

@@ -13,18 +13,10 @@ type Stats struct {
 	Muted   bool
 }
 
-type Monitor struct {
-	cmd *exec.Cmd
-}
+type Monitor struct{}
 
-func New() (*Monitor, error) {
-	return &Monitor{}, nil
-}
-
-func (m *Monitor) Close() {
-	if m.cmd != nil && m.cmd.Process != nil {
-		m.cmd.Process.Kill()
-	}
+func New() *Monitor {
+	return &Monitor{}
 }
 
 func (m *Monitor) Read() Stats {
@@ -60,13 +52,13 @@ func parseWpctlVolume(output string) Stats {
 
 func (m *Monitor) Listen(ctx context.Context) (<-chan Stats, error) {
 	// Start pactl subscribe to listen for events
-	m.cmd = exec.CommandContext(ctx, "pactl", "subscribe")
-	stdout, err := m.cmd.StdoutPipe()
+	cmd := exec.CommandContext(ctx, "pactl", "subscribe")
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
 	}
 
-	if err := m.cmd.Start(); err != nil {
+	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 
