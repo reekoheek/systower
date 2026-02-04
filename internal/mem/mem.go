@@ -33,8 +33,8 @@ func (s Stats) Percent() int {
 	return int(math.Round(float64(s.TotalUsed()) * 100 / float64(total)))
 }
 
-func (s Stats) TotalUsedInGB() float64 {
-	return float64(s.TotalUsed()) / 1024 / 1024
+func (s Stats) TotalUsedInGB() int {
+	return int(math.Round(float64(s.TotalUsed()) / 1024 / 1024))
 }
 
 func (s Stats) MemPercent() int {
