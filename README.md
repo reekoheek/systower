@@ -4,8 +4,9 @@ A lightweight system monitor daemon for Linux status bars. Designed to work with
 
 ## Features
 
-- **Event-driven** - Uses D-Bus signals for battery and caffeine changes (no polling)
-- **Efficient polling** - CPU, memory, and storage use configurable intervals
+- **Event-driven** - Uses D-Bus signals, udev netlink, and PulseAudio events (no polling for most monitors)
+- **Efficient polling** - Clock, CPU, memory, and storage use configurable intervals with GCD-based ticker optimization
+- **Low wakeups** - Dynamic ticker interval calculated from GCD of all polling intervals minimizes CPU wakeups
 - **Smart power management**:
   - Auto-disables caffeine when battery drops below 15%
   - Sends notification and powers off when battery drops below 5%
@@ -33,18 +34,13 @@ Outputs system stats to stdout in yambar-compatible format:
 systower watch
 ```
 
-With custom intervals:
+Default polling intervals:
+- Clock: 1s
+- CPU: 5s
+- Memory: 5s
+- Storage: 60s
 
-```bash
-systower watch -clock=1s -cpu=10s -mem=10s -storage=5m -throttle=100ms
-```
-
-Flags:
-- `-clock` - clock polling interval (default: 1s)
-- `-cpu` - CPU polling interval (default: 5s)
-- `-mem` - memory polling interval (default: 5s)
-- `-storage` - storage polling interval (default: 300s)
-- `-throttle` - throttle interval for output batching (default: 50ms)
+The ticker interval is automatically optimized using GCD (Greatest Common Divisor) of all polling intervals. For example, with intervals of 1s, 5s, 5s, and 60s, the GCD is 1s, resulting in 1 wakeup/second. To reduce wakeups further, increase the clock interval (e.g., Clock: 5s would give GCD=5s = 0.2 wakeups/second).
 
 Output format:
 
@@ -107,20 +103,20 @@ bar:
 
 | Monitor | Source | Update Method |
 |---------|--------|---------------|
-| Backlight | `/sys/class/backlight`, udev | Event-driven |
-| Clock | System time | Polling (1s) |
+| Backlight | `/sys/class/backlight`, udev netlink | Event-driven |
+| Clock | System time | Polling (configurable, default 1s) |
 | Caffeine | D-Bus signal | Event-driven |
 | Battery | UPower D-Bus | Event-driven |
-| CPU | `/proc/stat` | Polling (5s) |
-| Memory | `/proc/meminfo`, `/proc/swaps` | Polling (5s) |
-| Storage | `syscall.Statfs` | Polling (300s) |
-| Volume | PulseAudio | Event-driven |
+| CPU | `/proc/stat` | Polling (configurable, default 5s) |
+| Memory | `/proc/meminfo`, `/proc/swaps` | Polling (configurable, default 5s) |
+| Storage | `syscall.Statfs` | Polling (configurable, default 60s) |
+| Volume | PulseAudio (`pactl subscribe`) | Event-driven |
 
 ## Dependencies
 
 - D-Bus (for battery monitoring and notifications)
 - UPower (for battery information)
-- PulseAudio (for volume monitoring)
+- PulseAudio/PipeWire (`pactl`, `wpctl` for volume monitoring)
 - X11: `xset` command (for caffeine on X11)
 - Wayland: swayidle (for caffeine on Wayland)
 

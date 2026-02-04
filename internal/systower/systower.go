@@ -30,9 +30,30 @@ type Stats struct {
 }
 
 type Intervals struct {
+	Clock   uint64
 	CPU     uint64
 	Mem     uint64
 	Storage uint64
+}
+
+// gcd calculates greatest common divisor of two numbers
+func gcd(a, b uint64) uint64 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
+// baseInterval calculates the optimal ticker interval using GCD
+func (i Intervals) baseInterval() time.Duration {
+	result := i.Clock
+	result = gcd(result, i.CPU)
+	result = gcd(result, i.Mem)
+	result = gcd(result, i.Storage)
+	if result == 0 {
+		result = 1
+	}
+	return time.Duration(result) * time.Second
 }
 
 type Systower struct {
@@ -112,9 +133,17 @@ func (s *Systower) Watch(ctx context.Context) error {
 		return fmt.Errorf("volume monitor: %w", err)
 	}
 
-	// Single ticker with counters for different intervals
-	ticker := time.NewTicker(time.Second)
+	// Calculate optimal ticker interval using GCD of all intervals
+	baseInterval := s.intervals.baseInterval()
+	ticker := time.NewTicker(baseInterval)
 	defer ticker.Stop()
+
+	// Convert intervals to tick counts based on base interval
+	baseSeconds := uint64(baseInterval / time.Second)
+	clockTicks := s.intervals.Clock / baseSeconds
+	cpuTicks := s.intervals.CPU / baseSeconds
+	memTicks := s.intervals.Mem / baseSeconds
+	storageTicks := s.intervals.Storage / baseSeconds
 
 	var tickCount uint64
 
@@ -148,14 +177,16 @@ func (s *Systower) Watch(ctx context.Context) error {
 
 		case <-ticker.C:
 			tickCount++
-			s.stats.Clock = s.clockReader.Read()
-			if tickCount%s.intervals.CPU == 0 {
+			if tickCount%clockTicks == 0 {
+				s.stats.Clock = s.clockReader.Read()
+			}
+			if tickCount%cpuTicks == 0 {
 				s.stats.CPU = s.cpuReader.Read()
 			}
-			if tickCount%s.intervals.Mem == 0 {
+			if tickCount%memTicks == 0 {
 				s.stats.Mem = s.memReader.Read()
 			}
-			if tickCount%s.intervals.Storage == 0 {
+			if tickCount%storageTicks == 0 {
 				s.stats.Storage = s.storageReader.Read()
 			}
 		}

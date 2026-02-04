@@ -35,8 +35,9 @@ func main() {
 
 func runWatch() {
 	s, err := systower.New(systower.Intervals{
-		CPU:     3,
-		Mem:     3,
+		Clock:   1,
+		CPU:     5,
+		Mem:     5,
 		Storage: 60,
 	})
 	if err != nil {
