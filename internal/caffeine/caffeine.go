@@ -1,7 +1,6 @@
 package caffeine
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 
@@ -22,12 +21,20 @@ func (s Stats) String() string {
 type Caffeine struct {
 	adapter    Adapter
 	statusFile string
+	inotifyFd  int
+	buf        []byte
 }
 
 func New(adapter Adapter) *Caffeine {
+	return NewWithStatusFile(adapter, filepath.Join(getRuntimeDir(), "caffeine.status"))
+}
+
+func NewWithStatusFile(adapter Adapter, statusFile string) *Caffeine {
 	return &Caffeine{
 		adapter:    adapter,
-		statusFile: filepath.Join(getRuntimeDir(), "caffeine.status"),
+		statusFile: statusFile,
+		inotifyFd:  -1,
+		buf:        make([]byte, 1024),
 	}
 }
 
@@ -57,72 +64,49 @@ func (c *Caffeine) Toggle() {
 	}
 }
 
-func (c *Caffeine) Listen(ctx context.Context) (<-chan struct{}, error) {
+// InitFd creates and returns the inotify fd for status file changes
+// Caller is responsible for closing the fd
+func (c *Caffeine) InitFd() (int, error) {
 	// Initialize status file if not exists
 	if _, err := os.Stat(c.statusFile); os.IsNotExist(err) {
 		os.WriteFile(c.statusFile, []byte("0"), 0644)
 	}
 
-	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC)
+	fd, err := unix.InotifyInit1(unix.IN_NONBLOCK | unix.IN_CLOEXEC)
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
 
 	_, err = unix.InotifyAddWatch(fd, c.statusFile, unix.IN_MODIFY|unix.IN_CREATE)
 	if err != nil {
 		unix.Close(fd)
-		return nil, err
+		return -1, err
 	}
 
-	ch := make(chan struct{}, 1)
+	c.inotifyFd = fd
+	return fd, nil
+}
 
-	go func() {
-		defer close(ch)
-		defer unix.Close(fd)
-
-		cancelFd, err := unix.Eventfd(0, unix.EFD_NONBLOCK)
+// Drain reads and clears pending inotify events
+func (c *Caffeine) Drain() {
+	if c.inotifyFd < 0 {
+		return
+	}
+	// Read all pending events to clear the fd
+	for {
+		_, err := unix.Read(c.inotifyFd, c.buf)
 		if err != nil {
-			return
+			break
 		}
-		defer unix.Close(cancelFd)
+	}
+}
 
-		context.AfterFunc(ctx, func() {
-			unix.Write(cancelFd, []byte{1, 0, 0, 0, 0, 0, 0, 0})
-		})
-
-		buf := make([]byte, 1024)
-		fds := []unix.PollFd{
-			{Fd: int32(fd), Events: unix.POLLIN},
-			{Fd: int32(cancelFd), Events: unix.POLLIN},
-		}
-
-		for {
-			n, err := unix.Poll(fds, -1)
-			if err != nil {
-				if err == unix.EINTR {
-					continue
-				}
-				return
-			}
-			if n == 0 {
-				continue
-			}
-
-			if fds[1].Revents&unix.POLLIN != 0 {
-				return
-			}
-
-			if fds[0].Revents&unix.POLLIN != 0 {
-				unix.Read(fd, buf)
-				select {
-				case ch <- struct{}{}:
-				default:
-				}
-			}
-		}
-	}()
-
-	return ch, nil
+// Close closes the inotify fd
+func (c *Caffeine) Close() {
+	if c.inotifyFd >= 0 {
+		unix.Close(c.inotifyFd)
+		c.inotifyFd = -1
+	}
 }
 
 func DetectAdapter() Adapter {

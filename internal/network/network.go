@@ -1,7 +1,6 @@
 package network
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/godbus/dbus/v5"
@@ -48,6 +47,45 @@ type Monitor struct {
 
 func New(conn *dbus.Conn) *Monitor {
 	return &Monitor{conn: conn}
+}
+
+// Init detects devices and returns D-Bus match rules
+func (m *Monitor) Init() ([]string, error) {
+	if err := m.detectDevices(); err != nil {
+		return nil, err
+	}
+
+	var matchRules []string
+
+	if m.wifiDev != "" {
+		matchRules = append(matchRules,
+			fmt.Sprintf("type='signal',interface='%s',member='%s',path='%s'",
+				nmDeviceIface, stateChangedSig, m.wifiDev),
+			fmt.Sprintf("type='signal',interface='%s',member='%s',path='%s'",
+				propsIface, propsChanged, m.wifiDev),
+		)
+	}
+
+	if m.ethDev != "" {
+		matchRules = append(matchRules,
+			fmt.Sprintf("type='signal',interface='%s',member='%s',path='%s'",
+				nmDeviceIface, stateChangedSig, m.ethDev),
+			fmt.Sprintf("type='signal',interface='%s',member='%s',path='%s'",
+				propsIface, propsChanged, m.ethDev),
+		)
+	}
+
+	return matchRules, nil
+}
+
+// WifiPath returns the wifi device D-Bus path
+func (m *Monitor) WifiPath() dbus.ObjectPath {
+	return m.wifiDev
+}
+
+// EthPath returns the ethernet device D-Bus path
+func (m *Monitor) EthPath() dbus.ObjectPath {
+	return m.ethDev
 }
 
 func (m *Monitor) detectDevices() error {
@@ -231,46 +269,4 @@ func (m *Monitor) getDeviceIP(devPath dbus.ObjectPath) string {
 	}
 
 	return ""
-}
-
-func (m *Monitor) Listen(ctx context.Context) (<-chan *dbus.Signal, error) {
-	if err := m.detectDevices(); err != nil {
-		return nil, err
-	}
-
-	// Add match rules for device state changes
-	var matchRules []string
-
-	if m.wifiDev != "" {
-		matchRules = append(matchRules,
-			fmt.Sprintf("type='signal',interface='%s',member='%s',path='%s'",
-				nmDeviceIface, stateChangedSig, m.wifiDev),
-			fmt.Sprintf("type='signal',interface='%s',member='%s',path='%s'",
-				propsIface, propsChanged, m.wifiDev),
-		)
-	}
-
-	if m.ethDev != "" {
-		matchRules = append(matchRules,
-			fmt.Sprintf("type='signal',interface='%s',member='%s',path='%s'",
-				nmDeviceIface, stateChangedSig, m.ethDev),
-			fmt.Sprintf("type='signal',interface='%s',member='%s',path='%s'",
-				propsIface, propsChanged, m.ethDev),
-		)
-	}
-
-	for _, rule := range matchRules {
-		if err := m.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule).Err; err != nil {
-			return nil, fmt.Errorf("add match rule: %w", err)
-		}
-	}
-
-	ch := make(chan *dbus.Signal, 1)
-	m.conn.Signal(ch)
-
-	context.AfterFunc(ctx, func() {
-		m.conn.RemoveSignal(ch)
-	})
-
-	return ch, nil
 }

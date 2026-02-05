@@ -16,6 +16,7 @@ import (
 	"github.com/reekoheek/systower/internal/cpu"
 	"github.com/reekoheek/systower/internal/mem"
 	"github.com/reekoheek/systower/internal/network"
+	"github.com/reekoheek/systower/internal/poller"
 	"github.com/reekoheek/systower/internal/storage"
 	"github.com/reekoheek/systower/internal/volume"
 )
@@ -105,38 +106,73 @@ func New(intervals Intervals) (*Systower, error) {
 }
 
 func (s *Systower) Watch(ctx context.Context) error {
+	// Initialize unified poller with base interval
+	baseInterval := s.intervals.baseInterval()
+	poll, err := poller.New(baseInterval)
+	if err != nil {
+		return fmt.Errorf("poller: %w", err)
+	}
+
 	// Cleanup when context is cancelled
 	context.AfterFunc(ctx, func() {
-		s.sysConn.Close()
+		poll.Cancel() // Wake up poll to exit
 	})
 
-	// Start all monitors - they return channels
-	blCh := s.blMon.Listen(ctx)
+	defer func() {
+		poll.Close()
+		s.sysConn.Close()
+		s.blMon.Close()
+		s.caff.Close()
+		s.volMon.Close()
+	}()
 
-	batCh, err := s.batMon.Listen(ctx)
+	// Initialize backlight fd and add to poller
+	blFd, err := s.blMon.InitFd()
 	if err != nil {
-		return fmt.Errorf("battery monitor: %w", err)
+		return fmt.Errorf("backlight fd: %w", err)
+	}
+	poll.AddSource(blFd, poller.EventBacklight)
+
+	// Initialize caffeine fd and add to poller
+	caffFd, err := s.caff.InitFd()
+	if err != nil {
+		return fmt.Errorf("caffeine fd: %w", err)
+	}
+	poll.AddSource(caffFd, poller.EventCaffeine)
+
+	// Initialize volume fd and add to poller
+	volFd, err := s.volMon.InitFd()
+	if err != nil {
+		return fmt.Errorf("volume fd: %w", err)
+	}
+	poll.AddSource(volFd, poller.EventVolume)
+
+	// Build poll fds array
+	poll.Init()
+
+	// Setup single D-Bus signal channel for battery and network
+	dbusCh := make(chan *dbus.Signal, 10)
+	s.sysConn.Signal(dbusCh)
+
+	// Initialize battery and add match rules
+	batRule, err := s.batMon.Init()
+	if err != nil {
+		return fmt.Errorf("battery init: %w", err)
+	}
+	if err := s.sysConn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, batRule).Err; err != nil {
+		return fmt.Errorf("battery match rule: %w", err)
 	}
 
-	caffCh, err := s.caff.Listen(ctx)
+	// Initialize network and add match rules
+	netRules, err := s.netMon.Init()
 	if err != nil {
-		return fmt.Errorf("caffeine monitor: %w", err)
+		return fmt.Errorf("network init: %w", err)
 	}
-
-	volCh, err := s.volMon.Listen(ctx)
-	if err != nil {
-		return fmt.Errorf("volume monitor: %w", err)
+	for _, rule := range netRules {
+		if err := s.sysConn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule).Err; err != nil {
+			return fmt.Errorf("network match rule: %w", err)
+		}
 	}
-
-	netCh, err := s.netMon.Listen(ctx)
-	if err != nil {
-		return fmt.Errorf("network monitor: %w", err)
-	}
-
-	// Calculate optimal ticker interval using GCD of all intervals
-	baseInterval := s.intervals.baseInterval()
-	ticker := time.NewTicker(baseInterval)
-	defer ticker.Stop()
 
 	// Convert intervals to tick counts based on base interval
 	baseSeconds := uint64(baseInterval / time.Second)
@@ -148,6 +184,7 @@ func (s *Systower) Watch(ctx context.Context) error {
 	var tickCount uint64
 
 	// Read initial values
+	s.stats.Backlight = s.blMon.Read()
 	s.stats.Clock = s.clockReader.Read()
 	s.stats.CPU = s.cpuReader.Read()
 	s.stats.Mem = s.memReader.Read()
@@ -155,45 +192,67 @@ func (s *Systower) Watch(ctx context.Context) error {
 	s.stats.Caffeine = s.caff.Read()
 	s.stats.Battery = s.batMon.Read(nil)
 	s.stats.Network = s.netMon.Read(nil)
+	s.stats.Volume = s.volMon.Stats()
 
 	var lastStats Stats
 
 	for {
-		select {
-		case <-ctx.Done():
+		// Block on poll - wakes up on timer or any event
+		events, cancelled := poll.Wait()
+		if cancelled {
 			return nil
+		}
 
-		case stats := <-blCh:
-			s.stats.Backlight = stats
+		// Process poll events
+		for _, ev := range events {
+			switch ev.Type {
+			case poller.EventTicker:
+				tickCount++
+				if tickCount%clockTicks == 0 {
+					s.stats.Clock = s.clockReader.Read()
+				}
+				if tickCount%cpuTicks == 0 {
+					s.stats.CPU = s.cpuReader.Read()
+				}
+				if tickCount%memTicks == 0 {
+					s.stats.Mem = s.memReader.Read()
+				}
+				if tickCount%storageTicks == 0 {
+					s.stats.Storage = s.storageReader.Read()
+				}
 
-		case sig := <-batCh:
-			s.stats.Battery = s.batMon.Read(sig)
-			s.onBatteryUpdated(s.stats.Battery)
+			case poller.EventBacklight:
+				if s.blMon.Drain() {
+					s.stats.Backlight = s.blMon.Read()
+				}
 
-		case <-caffCh:
-			s.stats.Caffeine = s.caff.Read()
+			case poller.EventCaffeine:
+				s.caff.Drain()
+				s.stats.Caffeine = s.caff.Read()
 
-		case stats := <-volCh:
-			s.stats.Volume = stats
-
-		case sig := <-netCh:
-			s.stats.Network = s.netMon.Read(sig)
-
-		case <-ticker.C:
-			tickCount++
-			if tickCount%clockTicks == 0 {
-				s.stats.Clock = s.clockReader.Read()
-			}
-			if tickCount%cpuTicks == 0 {
-				s.stats.CPU = s.cpuReader.Read()
-			}
-			if tickCount%memTicks == 0 {
-				s.stats.Mem = s.memReader.Read()
-			}
-			if tickCount%storageTicks == 0 {
-				s.stats.Storage = s.storageReader.Read()
+			case poller.EventVolume:
+				if s.volMon.Drain() {
+					s.stats.Volume = s.volMon.Stats()
+				}
 			}
 		}
+
+		// Drain D-Bus signals (non-blocking)
+		// D-Bus signals may be delayed up to 1 tick interval, which is acceptable
+		for {
+			select {
+			case sig := <-dbusCh:
+				if sig.Path == s.batMon.Path() {
+					s.stats.Battery = s.batMon.Read(sig)
+					s.onBatteryUpdated(s.stats.Battery)
+				} else if sig.Path == s.netMon.WifiPath() || sig.Path == s.netMon.EthPath() {
+					s.stats.Network = s.netMon.Read(sig)
+				}
+			default:
+				goto dbusDone
+			}
+		}
+	dbusDone:
 
 		if s.stats != lastStats {
 			lastStats = s.stats

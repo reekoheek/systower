@@ -3,8 +3,6 @@
 package backlight
 
 import (
-	"bytes"
-	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -31,6 +29,8 @@ func (s Stats) Percent() int {
 type Monitor struct {
 	device        string
 	maxBrightness int
+	netlinkFd     int
+	buf           []byte
 }
 
 func New(device string) (*Monitor, error) {
@@ -50,6 +50,8 @@ func New(device string) (*Monitor, error) {
 	return &Monitor{
 		device:        device,
 		maxBrightness: maxBrightness,
+		netlinkFd:     -1,
+		buf:           make([]byte, 4096),
 	}, nil
 }
 
@@ -61,86 +63,76 @@ func (m *Monitor) Read() Stats {
 	}
 }
 
-func (m *Monitor) Listen(ctx context.Context) <-chan Stats {
-	ch := make(chan Stats, 1)
+// InitFd creates and returns the netlink fd for udev events
+// Caller is responsible for closing the fd
+func (m *Monitor) InitFd() (int, error) {
+	fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, syscall.NETLINK_KOBJECT_UEVENT)
+	if err != nil {
+		return -1, err
+	}
 
-	go func() {
-		defer close(ch)
+	addr := syscall.SockaddrNetlink{
+		Family: syscall.AF_NETLINK,
+		Groups: 2, // UDEV_MONITOR_UDEV (processed events)
+	}
+	if err := syscall.Bind(fd, &addr); err != nil {
+		syscall.Close(fd)
+		return -1, err
+	}
 
-		// Create netlink socket for udev events
-		fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW, syscall.NETLINK_KOBJECT_UEVENT)
-		if err != nil {
-			return
-		}
-		defer syscall.Close(fd)
-
-		addr := syscall.SockaddrNetlink{
-			Family: syscall.AF_NETLINK,
-			Groups: 2, // UDEV_MONITOR_UDEV (processed events)
-		}
-		if err := syscall.Bind(fd, &addr); err != nil {
-			return
-		}
-
-		// Create eventfd for cancellation
-		cancelFd, err := unix.Eventfd(0, unix.EFD_NONBLOCK)
-		if err != nil {
-			return
-		}
-		defer syscall.Close(cancelFd)
-
-		context.AfterFunc(ctx, func() {
-			unix.Write(cancelFd, []byte{1, 0, 0, 0, 0, 0, 0, 0})
-		})
-
-		ch <- m.Read()
-
-		buf := make([]byte, 4096)
-		fds := []unix.PollFd{
-			{Fd: int32(fd), Events: unix.POLLIN},
-			{Fd: int32(cancelFd), Events: unix.POLLIN},
-		}
-
-		for {
-			n, err := unix.Poll(fds, -1)
-			if err != nil {
-				if err == syscall.EINTR {
-					continue
-				}
-				return
-			}
-			if n == 0 {
-				continue
-			}
-
-			if fds[1].Revents&unix.POLLIN != 0 {
-				return
-			}
-
-			if fds[0].Revents&unix.POLLIN != 0 {
-				n, _, err := syscall.Recvfrom(fd, buf, 0)
-				if err != nil {
-					continue
-				}
-				if m.isBacklightEvent(buf[:n]) {
-					ch <- m.Read()
-				}
-			}
-		}
-	}()
-
-	return ch
+	m.netlinkFd = fd
+	return fd, nil
 }
 
+// Drain reads and processes pending events, returns true if backlight changed
+func (m *Monitor) Drain() bool {
+	if m.netlinkFd < 0 {
+		return false
+	}
+
+	changed := false
+	for {
+		n, _, err := syscall.Recvfrom(m.netlinkFd, m.buf, unix.MSG_DONTWAIT)
+		if err != nil {
+			break
+		}
+		if m.isBacklightEvent(m.buf[:n]) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// Close closes the netlink fd
+func (m *Monitor) Close() {
+	if m.netlinkFd >= 0 {
+		syscall.Close(m.netlinkFd)
+		m.netlinkFd = -1
+	}
+}
 
 // isBacklightEvent checks if the udev event is for our backlight device
 func (m *Monitor) isBacklightEvent(data []byte) bool {
-	// Udev event format: key=value pairs separated by null bytes
-	// We look for SUBSYSTEM=backlight and our device path
-	hasBacklight := bytes.Contains(data, []byte("SUBSYSTEM=backlight"))
-	hasDevice := bytes.Contains(data, []byte("/"+m.device+"\x00")) ||
-		bytes.Contains(data, []byte("/"+m.device+"@"))
+	hasBacklight := indexOf(data, []byte("SUBSYSTEM=backlight")) >= 0
+	hasDevice := indexOf(data, []byte("/"+m.device+"\x00")) >= 0 ||
+		indexOf(data, []byte("/"+m.device+"@")) >= 0
 	return hasBacklight && hasDevice
+}
+
+func indexOf(data, pattern []byte) int {
+	for i := 0; i <= len(data)-len(pattern); i++ {
+		match := true
+		for j := 0; j < len(pattern); j++ {
+			if data[i+j] != pattern[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }
 
 func detectDevice() (string, error) {

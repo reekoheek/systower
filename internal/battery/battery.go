@@ -1,7 +1,6 @@
 package battery
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -27,6 +26,25 @@ type Monitor struct {
 
 func New(conn *dbus.Conn) *Monitor {
 	return &Monitor{conn: conn}
+}
+
+// Init detects the battery and returns the D-Bus match rule
+func (m *Monitor) Init() (string, error) {
+	if err := m.detectBattery(); err != nil {
+		return "", err
+	}
+
+	matchRule := fmt.Sprintf(
+		"type='signal',interface='%s',member='%s',path='%s'",
+		propsIface, propsChangedSignal, m.path,
+	)
+
+	return matchRule, nil
+}
+
+// Path returns the battery D-Bus path
+func (m *Monitor) Path() dbus.ObjectPath {
+	return m.path
 }
 
 func (m *Monitor) detectBattery() error {
@@ -164,28 +182,4 @@ func (m *Monitor) fetchStats() (Stats, bool) {
 	}
 
 	return stats, true
-}
-
-func (m *Monitor) Listen(ctx context.Context) (<-chan *dbus.Signal, error) {
-	if err := m.detectBattery(); err != nil {
-		return nil, err
-	}
-
-	matchRule := fmt.Sprintf(
-		"type='signal',interface='%s',member='%s',path='%s'",
-		propsIface, propsChangedSignal, m.path,
-	)
-
-	if err := m.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, matchRule).Err; err != nil {
-		return nil, fmt.Errorf("failed to add match rule: %w", err)
-	}
-
-	ch := make(chan *dbus.Signal, 1)
-	m.conn.Signal(ch)
-
-	context.AfterFunc(ctx, func() {
-		m.conn.RemoveSignal(ch)
-	})
-
-	return ch, nil
 }

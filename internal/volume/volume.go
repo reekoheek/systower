@@ -1,11 +1,12 @@
 package volume
 
 import (
-	"bufio"
-	"context"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 type Stats struct {
@@ -13,10 +14,19 @@ type Stats struct {
 	Muted   bool
 }
 
-type Monitor struct{}
+type Monitor struct {
+	cmd       *exec.Cmd
+	fd        int
+	buf       []byte
+	lineBuf   []byte
+	lastStats Stats
+}
 
 func New() *Monitor {
-	return &Monitor{}
+	return &Monitor{
+		fd:  -1,
+		buf: make([]byte, 1024),
+	}
 }
 
 func (m *Monitor) Read() Stats {
@@ -50,41 +60,95 @@ func parseWpctlVolume(output string) Stats {
 	}
 }
 
-func (m *Monitor) Listen(ctx context.Context) (<-chan Stats, error) {
-	// Start pactl subscribe to listen for events
-	cmd := exec.CommandContext(ctx, "pactl", "subscribe")
-	stdout, err := cmd.StdoutPipe()
+// InitFd starts pactl subscribe and returns the stdout fd
+// Caller is responsible for calling Close()
+func (m *Monitor) InitFd() (int, error) {
+	m.cmd = exec.Command("pactl", "subscribe")
+	stdout, err := m.cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
 
-	if err := cmd.Start(); err != nil {
-		return nil, err
+	if err := m.cmd.Start(); err != nil {
+		return -1, err
 	}
 
-	ch := make(chan Stats, 1)
+	// Get raw fd from stdout pipe
+	file := stdout.(*os.File)
+	m.fd = int(file.Fd())
 
-	go func() {
-		defer close(ch)
+	// Set non-blocking
+	if err := unix.SetNonblock(m.fd, true); err != nil {
+		m.cmd.Process.Kill()
+		m.cmd.Wait()
+		return -1, err
+	}
 
-		// Send initial state
-		lastStats := m.Read()
-		ch <- lastStats
+	// Read initial state
+	m.lastStats = m.Read()
 
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			// Only react to sink events (volume/mute changes)
-			// Format: "Event 'change' on sink #123"
-			if strings.Contains(line, " on sink ") {
-				stats := m.Read()
-				if stats != lastStats {
-					lastStats = stats
-					ch <- stats
-				}
+	return m.fd, nil
+}
+
+// Drain reads available data and returns true if volume changed
+func (m *Monitor) Drain() bool {
+	if m.fd < 0 {
+		return false
+	}
+
+	// Read all available data
+	for {
+		n, err := unix.Read(m.fd, m.buf)
+		if err != nil || n == 0 {
+			break // EAGAIN or no data
+		}
+		m.lineBuf = append(m.lineBuf, m.buf[:n]...)
+	}
+
+	// Process complete lines
+	changed := false
+	for {
+		idx := indexByte(m.lineBuf, '\n')
+		if idx < 0 {
+			break
+		}
+
+		line := string(m.lineBuf[:idx])
+		m.lineBuf = m.lineBuf[idx+1:]
+
+		// Only react to sink events (volume/mute changes)
+		// Format: "Event 'change' on sink #123"
+		if strings.Contains(line, " on sink ") {
+			stats := m.Read()
+			if stats != m.lastStats {
+				m.lastStats = stats
+				changed = true
 			}
 		}
-	}()
+	}
 
-	return ch, nil
+	return changed
+}
+
+// Stats returns the last known stats
+func (m *Monitor) Stats() Stats {
+	return m.lastStats
+}
+
+// Close stops the pactl process
+func (m *Monitor) Close() {
+	if m.cmd != nil && m.cmd.Process != nil {
+		m.cmd.Process.Kill()
+		m.cmd.Wait()
+	}
+	m.fd = -1
+}
+
+func indexByte(b []byte, c byte) int {
+	for i, v := range b {
+		if v == c {
+			return i
+		}
+	}
+	return -1
 }

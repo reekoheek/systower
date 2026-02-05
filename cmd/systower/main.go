@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/reekoheek/systower/internal/caffeine"
@@ -14,7 +15,7 @@ import (
 const usage = "usage: systower <watch|caffeine <on|off|toggle|status>>"
 
 func main() {
-	// runtime.GOMAXPROCS(1)
+	runtime.GOMAXPROCS(1)
 
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, usage)

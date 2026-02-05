@@ -1,15 +1,28 @@
 package caffeine
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 type mockAdapter struct{}
 
 func (m *mockAdapter) On()  {}
 func (m *mockAdapter) Off() {}
 
+func newTestCaffeine(t *testing.T) *Caffeine {
+	t.Helper()
+	tmpDir := t.TempDir()
+	statusFile := filepath.Join(tmpDir, "caffeine.status")
+	return NewWithStatusFile(&mockAdapter{}, statusFile)
+}
+
 func TestNew(t *testing.T) {
 	adapter := &mockAdapter{}
-	c := New(adapter)
+	tmpDir := t.TempDir()
+	statusFile := filepath.Join(tmpDir, "caffeine.status")
+	c := NewWithStatusFile(adapter, statusFile)
 
 	if c == nil {
 		t.Error("New() should not return nil")
@@ -20,10 +33,9 @@ func TestNew(t *testing.T) {
 }
 
 func TestCaffeine_Read(t *testing.T) {
-	adapter := &mockAdapter{}
-	c := New(adapter)
+	c := newTestCaffeine(t)
 
-	// Initially should be off (false)
+	// Initially should be off (false) - file doesn't exist
 	if got := c.Read(); got.Active {
 		t.Errorf("Read().Active = %v, want false", got.Active)
 	}
@@ -42,8 +54,7 @@ func TestCaffeine_Read(t *testing.T) {
 }
 
 func TestCaffeine_Toggle(t *testing.T) {
-	adapter := &mockAdapter{}
-	c := New(adapter)
+	c := newTestCaffeine(t)
 
 	// Initially off, toggle should turn on
 	c.Toggle()
@@ -55,6 +66,39 @@ func TestCaffeine_Toggle(t *testing.T) {
 	c.Toggle()
 	if got := c.Read(); got.Active {
 		t.Errorf("after toggle from on, Read().Active = %v, want false", got.Active)
+	}
+}
+
+func TestCaffeine_InitFdAndDrain(t *testing.T) {
+	c := newTestCaffeine(t)
+
+	fd, err := c.InitFd()
+	if err != nil {
+		t.Fatalf("InitFd() error = %v", err)
+	}
+	if fd < 0 {
+		t.Error("InitFd() should return valid fd")
+	}
+
+	// Drain should not panic
+	c.Drain()
+
+	// Close should not panic
+	c.Close()
+}
+
+func TestCaffeine_ReadExistingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	statusFile := filepath.Join(tmpDir, "caffeine.status")
+
+	// Pre-create status file with "1"
+	if err := os.WriteFile(statusFile, []byte("1"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	c := NewWithStatusFile(&mockAdapter{}, statusFile)
+	if got := c.Read(); !got.Active {
+		t.Errorf("Read().Active = %v, want true", got.Active)
 	}
 }
 
