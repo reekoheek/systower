@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -11,6 +12,7 @@ import (
 type Stats struct {
 	Idle  uint64
 	Total uint64
+	Temp  int
 }
 
 func (s Stats) Percent() int {
@@ -23,10 +25,11 @@ func (s Stats) Percent() int {
 type Reader struct {
 	prevIdle  uint64
 	prevTotal uint64
+	tempPath  string
 }
 
 func New() *Reader {
-	return &Reader{}
+	return &Reader{tempPath: detectThermalZone()}
 }
 
 func (r *Reader) Read() Stats {
@@ -41,6 +44,7 @@ func (r *Reader) Read() Stats {
 	return Stats{
 		Idle:  deltaIdle,
 		Total: deltaTotal,
+		Temp:  r.readTemp(),
 	}
 }
 
@@ -76,4 +80,46 @@ func (r *Reader) readProcStat() (idle, total uint64) {
 	}
 
 	return idle, total
+}
+
+var cpuThermalTypes = []string{"x86_pkg_temp", "TCPU", "acpitz"}
+
+func detectThermalZone() string {
+	zones, _ := filepath.Glob("/sys/class/thermal/thermal_zone*/type")
+
+	for _, target := range cpuThermalTypes {
+		for _, zoneType := range zones {
+			data, err := os.ReadFile(zoneType)
+			if err != nil {
+				continue
+			}
+			if strings.TrimSpace(string(data)) == target {
+				return filepath.Join(filepath.Dir(zoneType), "temp")
+			}
+		}
+	}
+
+	if _, err := os.Stat("/sys/class/thermal/thermal_zone0/temp"); err == nil {
+		return "/sys/class/thermal/thermal_zone0/temp"
+	}
+
+	return ""
+}
+
+func (r *Reader) readTemp() int {
+	if r.tempPath == "" {
+		return 0
+	}
+
+	data, err := os.ReadFile(r.tempPath)
+	if err != nil {
+		return 0
+	}
+
+	millideg, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0
+	}
+
+	return int(math.Round(float64(millideg) / 1000))
 }

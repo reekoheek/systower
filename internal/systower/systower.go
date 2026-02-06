@@ -298,6 +298,7 @@ func (s *Systower) output() string {
 	fmt.Fprintf(&b, "bat_percent|int|%d\n", s.stats.Battery.Percent)
 	fmt.Fprintf(&b, "bat_estimate|string|%s\n", s.stats.Battery.Estimate)
 	fmt.Fprintf(&b, "cpu_percent|int|%d\n", s.stats.CPU.Percent())
+	fmt.Fprintf(&b, "cpu_temp|int|%d\n", s.stats.CPU.Temp)
 	fmt.Fprintf(&b, "mem_used|int|%d\n", s.stats.Mem.TotalUsedInGB())
 	fmt.Fprintf(&b, "mem_percent|int|%d\n", s.stats.Mem.Percent())
 	fmt.Fprintf(&b, "storage_percent|int|%d\n", s.stats.Storage.Percent())
