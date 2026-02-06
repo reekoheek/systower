@@ -25,6 +25,7 @@ func (s Stats) Percent() int {
 type Reader struct {
 	prevIdle  uint64
 	prevTotal uint64
+	prev      Stats
 	tempPath  string
 }
 
@@ -41,11 +42,14 @@ func (r *Reader) Read() Stats {
 	r.prevIdle = idle
 	r.prevTotal = total
 
-	return Stats{
-		Idle:  deltaIdle,
-		Total: deltaTotal,
-		Temp:  r.readTemp(),
+	s := Stats{Idle: deltaIdle, Total: deltaTotal, Temp: r.prev.Temp}
+
+	if s.Percent() != r.prev.Percent() {
+		s.Temp = r.readTemp()
 	}
+
+	r.prev = s
+	return s
 }
 
 func (r *Reader) readProcStat() (idle, total uint64) {
