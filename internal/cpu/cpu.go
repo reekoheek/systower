@@ -42,10 +42,10 @@ func (r *Reader) Read() Stats {
 	r.prevIdle = idle
 	r.prevTotal = total
 
-	s := Stats{Idle: deltaIdle, Total: deltaTotal, Temp: r.prev.Temp}
-
-	if s.Percent() != r.prev.Percent() {
-		s.Temp = r.readTemp()
+	s := Stats{
+		Idle:  deltaIdle,
+		Total: deltaTotal,
+		Temp:  r.readTemp(),
 	}
 
 	r.prev = s
